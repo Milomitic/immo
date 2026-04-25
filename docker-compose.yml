@@ -1,0 +1,45 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/immo.db
+      - CORS_ORIGINS=["http://localhost:3000"]
+      - LOG_LEVEL=INFO
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    command: npm run dev
+    depends_on:
+      - backend
+
+  scraper:
+    build: ./backend
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/immo.db
+      - SCRAPE_INTERVAL_HOURS=6
+      - SCRAPE_DEFAULT_CITY=milano
+    command: python -m scraper.runner
+    depends_on:
+      - backend

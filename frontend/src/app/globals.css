@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #1a1a2e;
+  --muted: #f4f5f7;
+  --muted-foreground: #6b7280;
+  --border: #e5e7eb;
+  --primary: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --primary-light: #eff6ff;
+  --accent: #f0f9ff;
+  --destructive: #ef4444;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --card-hover-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), 0 4px 10px rgba(0, 0, 0, 0.04);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --content-max: 1400px;
+}
+
+/* Scale root font-size on large displays so rem-based Tailwind utilities
+   (text-*, padding, gap, icon sizes) grow proportionally. Every step is
+   ~6% bigger than the previous — enough to feel right on 27"/32"/4K
+   monitors without making laptops look cartoonish. */
+html {
+  font-size: 16px;
+}
+@media (min-width: 1600px) {
+  html { font-size: 17px; }
+  :root { --content-max: 1600px; }
+}
+@media (min-width: 1920px) {
+  html { font-size: 18px; }
+  :root { --content-max: 1760px; }
+}
+@media (min-width: 2560px) {
+  html { font-size: 20px; }
+  :root { --content-max: 2100px; }
+}
+
+.dark {
+    --background: #0f0f14;
+    --foreground: #e5e5eb;
+    --muted: #1c1c26;
+    --muted-foreground: #9ca3af;
+    --border: #2d2d3a;
+    --primary: #3b82f6;
+    --primary-foreground: #ffffff;
+    --primary-light: #1e293b;
+    --accent: #1e293b;
+    --destructive: #dc2626;
+    --success: #059669;
+    --warning: #d97706;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --card-hover-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
