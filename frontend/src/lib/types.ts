@@ -3,6 +3,8 @@ export interface Listing {
   title: string;
   description: string | null;
   price: number | null;
+  price_previous: number | null;
+  price_changed_at: string | null;
   price_per_sqm: number | null;
   area_sqm: number | null;
   rooms: number | null;
@@ -95,6 +97,8 @@ export interface ListingSearchParams {
   year_built_min?: number;
   year_built_max?: number;
   bbox?: string;
+  /** User-drawn polygon: ``"lat,lng;lat,lng;...;lat,lng"`` (>=3 vertices). */
+  polygon?: string;
   sort?: string;
   page?: number;
   page_size?: number;
@@ -141,4 +145,28 @@ export interface ScrapeRun {
   listings_updated: number;
   listings_deactivated: number;
   errors: number;
+  progress_done?: number | null;
+  progress_total?: number | null;
+  phase?: string | null;
+  last_progress_at?: string | null;
+}
+
+export interface ScrapeStatus {
+  is_running: boolean;
+  is_stale: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  seconds_since_last_progress: number | null;
+  progress_done: number;
+  progress_total: number;
+  phase: string | null;
+  runs: ScrapeRun[];
+}
+
+export interface ScrapeTriggerResponse {
+  accepted: boolean;
+  portals: string[];
+  city: string;
+  started_at: string;
+  message: string;
 }

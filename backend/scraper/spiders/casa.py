@@ -87,6 +87,50 @@ class CasaSpider(BaseSpider):
 
         return urls
 
+    async def parse_search_results_with_prices(
+        self, html: str
+    ) -> list[tuple[str, float | None]]:
+        """Pair each result URL with the price shown on the card.
+
+        Casa.it cards render the price as a string like ``"€ 250.000"``
+        inside the same wrapper that holds the listing link. We co-walk
+        the DOM so the price stays attached to *its* card even when the
+        page contains banner-ads and unrelated promotional cards.
+        """
+        soup = BeautifulSoup(html, "lxml")
+        out: list[tuple[str, float | None]] = []
+        seen: set[str] = set()
+        for card in soup.select("[class*='csaSrpcard']"):
+            href = None
+            for link in card.find_all("a", href=True):
+                if "/immobili/" in link["href"]:
+                    href = link["href"]
+                    break
+            if not href:
+                continue
+            if href.startswith("/"):
+                href = self.base_url + href
+            if href in seen:
+                continue
+            seen.add(href)
+
+            # Price text — typically "€ 250.000" or "250.000 €" inside an
+            # element whose class contains "price" or "Price"; we search
+            # the card's text as a robust fallback against class hashing.
+            price = None
+            price_el = card.select_one("[class*='price'], [class*='Price']")
+            blob = (price_el.get_text(" ", strip=True) if price_el else card.get_text(" ", strip=True))
+            m = re.search(r"€\s*([\d.,]+)|([\d.,]+)\s*€", blob)
+            if m:
+                raw = (m.group(1) or m.group(2) or "").replace(".", "").replace(",", "")
+                if raw.isdigit():
+                    try:
+                        price = float(raw)
+                    except ValueError:
+                        price = None
+            out.append((href, price))
+        return out
+
     async def get_total_pages(self, html: str) -> int:
         """Estimate the page count for casa.it search results.
 
@@ -271,10 +315,20 @@ class CasaSpider(BaseSpider):
                 mid = entry.get("mediaid")
                 if not mid:
                     continue
-                img_url = f"{host}/800x600/{mid}" if host else ""
+                # The CDN expects ``{host}/{size}/listing/{mediaid}`` — without
+                # the ``/listing/`` segment the gateway returns 400 "Invalid
+                # URI format". Easy to miss because nothing in __NEXT_DATA__
+                # tells you about it; only inspecting the rendered HTML does.
+                img_url = f"{host}/800x600/listing/{mid}" if host else ""
                 if not img_url.startswith("http"):
                     continue
-                if entry.get("type") == "planimetry" or _looks_like_floor_plan(mid):
+                # casa.it tags floor plans as ``"floorplan"`` in English —
+                # we previously checked for the Italian ``"planimetry"`` and
+                # so silently dropped every floor plan into the photos list.
+                # Both forms accepted now plus a URL/path heuristic as
+                # last resort.
+                etype = (entry.get("type") or "").lower()
+                if etype in ("floorplan", "planimetry") or _looks_like_floor_plan(mid):
                     raw_floor_plans.append(img_url)
                 else:
                     raw_images.append(img_url)

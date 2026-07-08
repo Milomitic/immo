@@ -30,9 +30,12 @@ class Settings(BaseSettings):
     # requests-per-minute, so concurrency just lets us fill that budget in
     # parallel instead of serially with fixed delays.
     SCRAPE_CONCURRENCY: int = 4
-    # Re-runs skip detail-fetching for listings whose canonical row was
-    # refreshed more recently than this. Bumps last_seen_at only.
-    SCRAPE_FRESH_HOURS: int = 6
+    # NOTE: the old SCRAPE_FRESH_HOURS knob has been removed. Spiders now
+    # skip the detail-page fetch for *any* source_id already in the DB
+    # (regardless of age) — first observation is treated as immutable so
+    # the original snapshot survives subsequent runs. last_seen_at still
+    # gets bumped via `bump_last_seen` so LISTING_INACTIVE_DAYS keeps
+    # working.
 
     # Deduplication
     DEDUP_THRESHOLD: float = 0.85

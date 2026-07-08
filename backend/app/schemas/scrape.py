@@ -2,12 +2,15 @@ from pydantic import BaseModel
 
 
 class ScrapeTriggerRequest(BaseModel):
-    portal: str = "all"  # immobiliare, idealista, casa, all
+    portal: str = "all"  # immobiliare, idealista, casa, tecnocasa, remax, gabetti, vistocasa, all
     city: str | None = None
 
 
 class ScrapeTriggerResponse(BaseModel):
-    run_ids: list[str]
+    accepted: bool = True
+    portals: list[str]
+    city: str
+    started_at: str
     message: str
 
 
@@ -22,5 +25,28 @@ class ScrapeRunResponse(BaseModel):
     listings_updated: int
     listings_deactivated: int
     errors: int
+    # Live progress fields — surface what the heartbeat ticker writes
+    # in runner.py so the frontend toast can render an ETA.
+    progress_done: int | None = None
+    progress_total: int | None = None
+    phase: str | None = None
+    last_progress_at: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ScrapeStatusResponse(BaseModel):
+    """Aggregated status of the most recent scrape *job* — the set of
+    per-portal runs sharing a common start window. Designed to drive a
+    single progress toast in the UI: one bar, one ETA, regardless of
+    how many spiders are running in parallel.
+    """
+    is_running: bool
+    is_stale: bool  # heartbeat older than STALE_AFTER seconds
+    started_at: str | None = None
+    finished_at: str | None = None  # latest run's finished_at (only when all done)
+    seconds_since_last_progress: int | None = None
+    progress_done: int  # sum across portals
+    progress_total: int  # sum across portals
+    phase: str | None = None  # most-advanced phase across portals
+    runs: list[ScrapeRunResponse]  # per-portal breakdown

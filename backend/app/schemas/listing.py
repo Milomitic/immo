@@ -5,6 +5,8 @@ class ListingBase(BaseModel):
     title: str
     description: str | None = None
     price: float | None = None
+    price_previous: float | None = None
+    price_changed_at: str | None = None
     price_per_sqm: float | None = None
     area_sqm: float | None = None
     rooms: int | None = None
@@ -100,6 +102,11 @@ class ListingSearchParams(BaseModel):
     lng: float | None = None
     radius_km: float | None = None
     bbox: str | None = None  # "south,west,north,east" — used by the map view
+    # Free-form polygon as ``"lat1,lng1;lat2,lng2;...;latN,lngN"``. Ring is
+    # auto-closed if the last vertex differs from the first. Applied as a
+    # bounding-box pre-filter in SQL plus a point-in-polygon refinement in
+    # Python — see services.listing_service.
+    polygon: str | None = None
     sort: str = "newest"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

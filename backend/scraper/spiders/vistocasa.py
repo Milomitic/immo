@@ -20,12 +20,20 @@ and zone are read from the H1 (e.g. "Bari Liberta - Appartamento 2 vani
 in Vendita"). Image URLs follow the convention
 ``/immobili/fotoimmobile<id>/N.jpg`` and the count comes from how many of
 those references appear in the gallery markup.
+
+Vistocasa exposes no publication/insertion date in the HTML, JSON-LD,
+OpenGraph tags, or HTTP headers of the detail page. We use the same
+fallback as Gabetti: HEAD the first listing image at
+``/immobili/fotoimmobile<id>/1.jpg`` and read its ``Last-Modified`` —
+the agent uploads photos when they list the property, so the timestamp
+lines up with the listing creation date.
 """
 
 import asyncio
 import re
 import unicodedata
 from collections.abc import AsyncGenerator
+from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -182,25 +190,65 @@ def _split_h1(h1: str) -> tuple[str, str | None, str | None]:
     return location, None, rest
 
 
-# Image URLs use the predictable pattern /immobili/fotoimmobileNNN/k.jpg.
-# We pull every reference to one and dedupe — all sizes/thumbnails point at
-# the same set, so we just normalise to "/k.jpg" form.
-_IMAGE_RE = re.compile(r"/immobili/fotoimmobile(\d+)/(\d+)\.jpg", re.IGNORECASE)
+# Image URLs live under /immobili/fotoimmobileNNN/. Two filename schemas
+# in the wild: legacy sequential integers (``1.jpg``, ``2.jpg``, ...) and
+# newer GUID-style names (``f55882e9-1b3f-...jpg``). The regex below covers
+# both for *photos*. Floor plans use literal spaces in filenames
+# (``PLANIMETRIA PIANO TERRA.jpg``) which would force a much messier regex,
+# so we extract them separately via BeautifulSoup off the
+# ``data-fancybox="planimetria"`` anchor.
+_IMAGE_RE = re.compile(
+    r"/immobili/fotoimmobile(\d+)/([\w\-]+\.(?:jpg|jpeg|png|webp))",
+    re.IGNORECASE,
+)
 
 
 def _extract_images(html: str, base_url: str, source_id: str) -> list[str]:
+    """Return photo URLs in the order they appear in the HTML — gallery
+    order with the cover image first.
+
+    GUID-named images have no natural sort key, so we preserve source
+    order rather than sorting numerically. That matches what a user sees
+    browsing the listing.
+    """
     seen: set[str] = set()
     out: list[str] = []
     for m in _IMAGE_RE.finditer(html):
         if m.group(1) != source_id:
             continue
-        idx = int(m.group(2))
-        url = f"{base_url}/immobili/fotoimmobile{source_id}/{idx}.jpg"
+        filename = m.group(2)
+        url = f"{base_url}/immobili/fotoimmobile{source_id}/{filename}"
         if url not in seen:
             seen.add(url)
             out.append(url)
-    # Sort by file index so the cover image is index 1.
-    out.sort(key=lambda u: int(_IMAGE_RE.search(u).group(2)))  # type: ignore[union-attr]
+    return out
+
+
+def _extract_floor_plans(soup: BeautifulSoup, base_url: str, source_id: str) -> list[str]:
+    """Pull floor-plan URLs out of fancybox anchors.
+
+    Vistocasa renders planimetrie as ``<a data-fancybox="planimetria"
+    href="../immobili/fotoimmobileNNN/PLANIMETRIA PIANO TERRA.jpg">``.
+    Filenames contain literal spaces (yes, really) and have no GUID, so a
+    DOM walk is far cleaner than a permissive regex over raw HTML.
+    URL-spaces get encoded to ``%20`` so the browser can fetch them.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for a in soup.select('a[data-fancybox="planimetria"]'):
+        href = a.get("href", "")
+        if not href:
+            continue
+        href = href.lstrip("./")  # strip "../" prefix used in the page
+        # Restrict to this listing's folder so we don't collect related
+        # listings' planimetrie if any are referenced.
+        if f"immobili/fotoimmobile{source_id}/" not in href:
+            continue
+        # Encode spaces (and only spaces) — the rest of the path is safe.
+        url = urljoin(base_url + "/", href).replace(" ", "%20")
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
     return out
 
 
@@ -262,6 +310,48 @@ class VistocasaSpider(BaseSpider):
                 urls.append(url)
         return urls
 
+    async def parse_search_results_with_prices(
+        self, html: str
+    ) -> list[tuple[str, float | None]]:
+        """Vistocasa search cards include a price like ``149.000 €`` (or
+        the mojibake ``â‚¬`` variant when the page is misencoded). The
+        cards are anonymous divs without stable classes, so we slice the
+        HTML between consecutive ``ArticoliId=`` references and look for
+        a euro figure inside each slice. That keeps each price tied to
+        the right card without trusting the DOM structure.
+        """
+        out: list[tuple[str, float | None]] = []
+        seen: set[str] = set()
+        # Find all ArticoliId positions in document order
+        matches = list(re.finditer(r"[Ii]mmobile\.aspx\?ArticoliId=(\d+)", html))
+        for i, m in enumerate(matches):
+            sid = m.group(1)
+            url = f"{self.base_url}/it/immobile.aspx?ArticoliId={sid}"
+            if url in seen:
+                continue
+            seen.add(url)
+            # Slice from this match up to the next (or +800 chars)
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else min(len(html), start + 800)
+            chunk = re.sub(r"<[^>]+>", " ", html[start:end])
+            # Match either € or the cp1252-mangled â‚¬, case-insensitive,
+            # number on either side
+            pm = re.search(
+                r"([\d][\d.,]*)\s*(?:€|â‚¬|euro)|(?:€|â‚¬|euro)\s*([\d][\d.,]*)",
+                chunk,
+                re.IGNORECASE,
+            )
+            price: float | None = None
+            if pm:
+                raw = (pm.group(1) or pm.group(2) or "").replace(".", "").replace(",", "")
+                if raw.isdigit():
+                    try:
+                        price = float(raw)
+                    except ValueError:
+                        price = None
+            out.append((url, price))
+        return out
+
     async def _post_search(self, page: int, vs: str, vsg: str) -> str | None:
         """Issue the ASP.NET __doPostBack to advance to ``page`` and return
         the response HTML. We rely on the same client (and therefore the
@@ -303,9 +393,14 @@ class VistocasaSpider(BaseSpider):
         total_pages = await self.get_total_pages(first_html)
         total_pages = min(total_pages, params.max_pages)
 
-        all_urls: list[str] = list(await self.parse_search_results(first_html))
+        # Collect (url, price) pairs across pages. First non-None price
+        # wins per URL, mirroring BaseSpider.run()'s dedup logic.
+        url_prices: dict[str, float | None] = {}
+        for u, p in await self.parse_search_results_with_prices(first_html):
+            if u not in url_prices or (url_prices[u] is None and p is not None):
+                url_prices[u] = p
         self.progress.set_description(
-            f"{self.portal_name} cerca pag 1/{total_pages} ({len(all_urls)} url)"
+            f"{self.portal_name} cerca pag 1/{total_pages} ({len(url_prices)} url)"
         )
 
         # Abort pagination after this many consecutive POST failures —
@@ -328,31 +423,31 @@ class VistocasaSpider(BaseSpider):
             viewstate = _hidden_field(page_soup, "__VIEWSTATE") or viewstate
             viewstate_gen = _hidden_field(page_soup, "__VIEWSTATEGENERATOR") or viewstate_gen
 
-            page_urls = await self.parse_search_results(page_html)
-            all_urls.extend(page_urls)
+            for u, p in await self.parse_search_results_with_prices(page_html):
+                if u not in url_prices or (url_prices[u] is None and p is not None):
+                    url_prices[u] = p
             self.progress.set_description(
-                f"{self.portal_name} cerca pag {page}/{total_pages} ({len(all_urls)} url)"
+                f"{self.portal_name} cerca pag {page}/{total_pages} ({len(url_prices)} url)"
             )
 
-        # Dedupe (page 1 always carries 99 sidebar/featured IDs that recur).
-        seen: set[str] = set()
-        listing_urls: list[str] = []
-        for u in all_urls:
-            if u not in seen:
-                seen.add(u)
-                listing_urls.append(u)
+        listing_urls: list[str] = list(url_prices.keys())
 
         if not listing_urls:
             self.progress.set_phase("done")
             return
 
-        # Fresh-skip handling — same shape as BaseSpider.run().
-        fresh_ids = params.fresh_source_ids or set()
+        # Known-skip handling — same shape as BaseSpider.run(). Capture
+        # the price observed on the search card for known IDs so the
+        # runner can spot price changes without a detail fetch.
+        known_ids = params.known_source_ids or set()
         to_fetch: list[str] = []
         for url in listing_urls:
             sid = self._extract_source_id_from_url(url)
-            if sid and sid in fresh_ids:
-                self.fresh_skipped_ids.append(sid)
+            if sid and sid in known_ids:
+                self.known_skipped_ids.append(sid)
+                p = url_prices.get(url)
+                if p is not None:
+                    self.observed_prices[sid] = p
             else:
                 to_fetch.append(url)
 
@@ -463,15 +558,22 @@ class VistocasaSpider(BaseSpider):
             if m:
                 address = "via " + m.group(1).strip()
 
-        # Images
+        # Images + floor plans
         images = _extract_images(html, self.base_url, source_id)
+        floor_plans = _extract_floor_plans(soup, self.base_url, source_id)
         # Fall back to the OG image if our regex missed (rare).
         if not images and og_image:
             img = og_image if og_image.startswith("http") else urljoin(self.base_url, og_image)
             images = [img]
 
-        # Publication date isn't reliably surfaced. Vistocasa shows
-        # "Inserito il 12/03/2026" in some templates — try to pick that up.
+        # Publication date. Vistocasa doesn't surface one in markup or
+        # headers, so we try (in order):
+        #   1. "Inserito il DD/MM/YYYY" / "Pubblicato il DD/MM/YYYY"
+        #      (rare — only on a few template variants);
+        #   2. the Last-Modified of the first listing image at
+        #      ``/immobili/fotoimmobile<id>/1.jpg`` — the agent uploads
+        #      the photo at listing-creation time, so its CDN timestamp
+        #      lines up with publication.
         publication_date: str | None = None
         m = re.search(
             r"(?:inserito|pubblicato)\s+il\s+(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})",
@@ -480,6 +582,8 @@ class VistocasaSpider(BaseSpider):
         )
         if m:
             publication_date = parse_italian_date(m.group(1))
+        if not publication_date and images:
+            publication_date = await self._pub_date_from_image(images[0])
 
         return ListingItem(
             source_portal=self.portal_name,
@@ -501,6 +605,7 @@ class VistocasaSpider(BaseSpider):
             property_type=property_type,
             listing_type=listing_type,
             images=images,
+            floor_plans=floor_plans,
             energy_class=energy_class,
             condition=condition,
             heating=heating,
@@ -509,3 +614,26 @@ class VistocasaSpider(BaseSpider):
             year_built=year_built,
             publication_date=publication_date,
         )
+
+    async def _pub_date_from_image(self, image_url: str | None) -> str | None:
+        """HEAD the first listing image and return its ``Last-Modified``
+        header as ISO 8601 (``YYYY-MM-DD``).
+
+        The vistocasa CDN fronts ``/immobili/fotoimmobile<id>/N.jpg`` and
+        responds to HEAD with the file's actual upload timestamp. Photos
+        get uploaded at listing-creation time, so the date is a reliable
+        proxy for publication. Returns ``None`` on any error so the
+        caller can leave ``publication_date=None`` rather than crash.
+        """
+        if not image_url:
+            return None
+        try:
+            client = await self._get_client()
+            resp = await client.head(image_url, timeout=10)
+            last_mod = resp.headers.get("last-modified")
+            if not last_mod:
+                return None
+            dt = parsedate_to_datetime(last_mod)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return None

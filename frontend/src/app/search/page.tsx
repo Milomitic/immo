@@ -45,10 +45,20 @@ function SearchContent() {
   const [sourcePortal] = useQueryState("source_portal", parseAsString);
   const [sort] = useQueryState("sort", parseAsString);
   const [page, setPage] = useQueryState("page", parseAsInteger);
+  const [pageSizeParam] = useQueryState("page_size", parseAsInteger);
   const [view] = useQueryState("view", parseAsString);
+  // Polygon perimeter — set by the user on /map and carried across to
+  // /search via the Header's preserved-params. The chip in ActiveFilters
+  // is the user's "remove" affordance so we don't need a setter here.
+  const [polygonStr] = useQueryState("polygon", parseAsString);
 
   const currentView = view || "grid";
   const currentPage = page || 1;
+  // Cap to backend's hard limit (100) — page_size is also validated there
+  // but we sanitize here so the UI never asks for nonsense.
+  const currentPageSize = [20, 50, 100].includes(pageSizeParam ?? 0)
+    ? (pageSizeParam as number)
+    : 20;
 
   // Comparison state
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
@@ -82,9 +92,10 @@ function SearchContent() {
     has_garage: hasGarage || undefined,
     has_garden: hasGarden || undefined,
     source_portal: sourcePortal || undefined,
+    polygon: polygonStr || undefined,
     sort: sort || "newest",
     page: currentPage,
-    page_size: 20,
+    page_size: currentPageSize,
   };
 
   const { data, isLoading, error } = useListings(params);
@@ -117,7 +128,37 @@ function SearchContent() {
         </div>
       </div>
 
-      {/* Active filters */}
+      {/* Polygon-active banner — explains why the result count may be
+          smaller than the user expects, and gives a one-click escape to
+          /map where the perimeter can be edited or redrawn. */}
+      {polygonStr && (
+        <Link
+          href={`/map?${(() => {
+            // Carry every current param to /map so the polygon stays
+            // visible alongside whatever filters the user has set.
+            const sp = new URLSearchParams();
+            const all = typeof window !== "undefined" ? window.location.search.slice(1) : "";
+            new URLSearchParams(all).forEach((v, k) => {
+              if (k !== "page" && k !== "view") sp.set(k, v);
+            });
+            return sp.toString();
+          })()}`}
+          className="mb-3 group flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--primary)]/30 bg-[var(--primary)]/5 px-4 py-2.5 text-sm hover:bg-[var(--primary)]/10 transition-colors"
+        >
+          <span className="text-base" aria-hidden>📐</span>
+          <span className="flex-1">
+            <span className="font-semibold text-[var(--primary)]">Area disegnata attiva.</span>{" "}
+            <span className="text-[var(--muted-foreground)]">
+              I risultati sono limitati al perimetro tracciato sulla mappa.
+            </span>
+          </span>
+          <span className="text-xs font-medium text-[var(--primary)] group-hover:underline">
+            Modifica sulla mappa →
+          </span>
+        </Link>
+      )}
+
+      {/* Active filters (chip strip — includes the polygon chip) */}
       <div className="mb-4">
         <ActiveFilters />
       </div>
@@ -132,7 +173,7 @@ function SearchContent() {
           <ResultsHeader
             total={data?.total || 0}
             page={currentPage}
-            pageSize={20}
+            pageSize={currentPageSize}
             isLoading={isLoading}
           />
 

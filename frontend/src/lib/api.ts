@@ -1,4 +1,13 @@
-import type { ListingDetail, ListingMarkersResponse, ListingSearchParams, PaginatedListings, Stats, Listing } from "./types";
+import type {
+  ListingDetail,
+  ListingMarkersResponse,
+  ListingSearchParams,
+  PaginatedListings,
+  ScrapeStatus,
+  ScrapeTriggerResponse,
+  Stats,
+  Listing,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -62,9 +71,13 @@ export async function fetchStats(): Promise<Stats> {
   return fetchApi<Stats>(`/api/stats`);
 }
 
-export async function triggerScrape(portal: string = "all") {
-  return fetchApi(`/api/scrape/trigger`, {
+export async function triggerScrape(portal: string = "all", city?: string): Promise<ScrapeTriggerResponse> {
+  return fetchApi<ScrapeTriggerResponse>(`/api/scrape/trigger`, {
     method: "POST",
-    body: JSON.stringify({ portal }),
+    body: JSON.stringify({ portal, ...(city ? { city } : {}) }),
   });
+}
+
+export async function fetchScrapeStatus(): Promise<ScrapeStatus> {
+  return fetchApi<ScrapeStatus>(`/api/scrape/status`);
 }

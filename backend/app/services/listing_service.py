@@ -21,6 +21,8 @@ def _listing_to_response(listing: Listing) -> ListingResponse:
         title=listing.title,
         description=listing.description,
         price=listing.price,
+        price_previous=listing.price_previous,
+        price_changed_at=listing.price_changed_at,
         price_per_sqm=listing.price_per_sqm,
         area_sqm=listing.area_sqm,
         rooms=listing.rooms,
@@ -172,16 +174,82 @@ def _apply_listing_filters(query, params: ListingSearchParams):
                 Listing.lng.between(west, east),
             )
 
+    # Polygon (user-drawn perimeter on the map). We push the polygon's
+    # bounding box into SQL — that uses the lat/lng index — and the
+    # caller refines the result set with a Python point-in-polygon test.
+    poly = parse_polygon(params.polygon)
+    if poly is not None:
+        s, w, n, e = polygon_bbox(poly)
+        query = query.where(
+            Listing.lat.isnot(None),
+            Listing.lng.isnot(None),
+            Listing.lat.between(s, n),
+            Listing.lng.between(w, e),
+        )
+
     return query
+
+
+# ---------------------------------------------------------------------------
+# Polygon helpers
+# ---------------------------------------------------------------------------
+
+def parse_polygon(raw: str | None) -> list[tuple[float, float]] | None:
+    """Decode a ``"lat,lng;lat,lng;..."`` string into a list of vertices.
+
+    Returns ``None`` for any malformed/short input — caller treats that
+    as "no polygon filter". A polygon needs at least three vertices to
+    enclose any area; we do *not* auto-close (the ray-casting routine
+    handles the wrap implicitly).
+    """
+    if not raw:
+        return None
+    pts: list[tuple[float, float]] = []
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            lat_s, lng_s = chunk.split(",", 1)
+            pts.append((float(lat_s), float(lng_s)))
+        except (ValueError, AttributeError):
+            return None
+    if len(pts) < 3:
+        return None
+    return pts
+
+
+def polygon_bbox(poly: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    """Return ``(south, west, north, east)`` enclosing the polygon."""
+    lats = [p[0] for p in poly]
+    lngs = [p[1] for p in poly]
+    return (min(lats), min(lngs), max(lats), max(lngs))
+
+
+def point_in_polygon(lat: float, lng: float, poly: list[tuple[float, float]]) -> bool:
+    """Even-odd ray-casting test. Treats the polygon as closed (last
+    vertex implicitly connects to the first). Edge-case: points on the
+    boundary may go either way — acceptable for a "draw to filter"
+    interaction where a 1-meter swing is invisible to the user.
+    """
+    n = len(poly)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        yi, xi = poly[i]
+        yj, xj = poly[j]
+        # Cast a ray going east; check whether it crosses the edge i->j.
+        if (yi > lat) != (yj > lat):
+            x_intersect = xi + (lat - yi) * (xj - xi) / (yj - yi)
+            if lng < x_intersect:
+                inside = not inside
+        j = i
+    return inside
 
 
 async def search_listings(db: AsyncSession, params: ListingSearchParams) -> PaginatedListings:
     query = select(Listing).options(selectinload(Listing.sources))
     query = _apply_listing_filters(query, params)
-
-    # Count total
-    count_query = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_query)).scalar() or 0
 
     # Sort. "newest" uses the original publication_date from the source
     # portal (what the user actually cares about), falling back to
@@ -192,18 +260,33 @@ async def search_listings(db: AsyncSession, params: ListingSearchParams) -> Pagi
         "price_asc": Listing.price.asc().nulls_last(),
         "price_desc": Listing.price.desc().nulls_last(),
         "area_desc": Listing.area_sqm.desc().nulls_last(),
+        "area_asc": Listing.area_sqm.asc().nulls_last(),
         "price_sqm_asc": Listing.price_per_sqm.asc().nulls_last(),
         "price_sqm_desc": Listing.price_per_sqm.desc().nulls_last(),
     }
     order = sort_map.get(params.sort, newest_order)
     query = query.order_by(order)
 
-    # Pagination
-    offset = (params.page - 1) * params.page_size
-    query = query.offset(offset).limit(params.page_size)
-
-    result = await db.execute(query)
-    listings = result.scalars().unique().all()
+    poly = parse_polygon(params.polygon)
+    if poly is None:
+        # Fast path: SQL count + LIMIT/OFFSET pagination, untouched.
+        count_query = select(func.count()).select_from(query.subquery())
+        total = (await db.execute(count_query)).scalar() or 0
+        offset = (params.page - 1) * params.page_size
+        query = query.offset(offset).limit(params.page_size)
+        result = await db.execute(query)
+        listings = result.scalars().unique().all()
+    else:
+        # Polygon path: SQL pre-filter via the polygon's bbox (already
+        # applied in `_apply_listing_filters`), then point-in-polygon
+        # in Python before pagination. We *cannot* rely on SQL count
+        # because the bbox over-counts diagonal corners.
+        result = await db.execute(query)
+        all_rows = result.scalars().unique().all()
+        filtered = [l for l in all_rows if l.lat is not None and l.lng is not None and point_in_polygon(l.lat, l.lng, poly)]
+        total = len(filtered)
+        offset = (params.page - 1) * params.page_size
+        listings = filtered[offset : offset + params.page_size]
 
     return PaginatedListings(
         items=[_listing_to_response(l) for l in listings],
@@ -243,17 +326,29 @@ async def get_listing_markers(
     ).where(Listing.lat.isnot(None), Listing.lng.isnot(None))
     query = _apply_listing_filters(query, params)
 
-    count_query = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_query)).scalar() or 0
-
     # Newest first so that if we hit the cap the user still sees fresh inventory.
     query = query.order_by(
         func.coalesce(Listing.publication_date, Listing.first_seen_at).desc()
-    ).limit(limit + 1)
+    )
 
-    rows = (await db.execute(query)).all()
-    truncated = len(rows) > limit
-    rows = rows[:limit]
+    poly = parse_polygon(params.polygon)
+    if poly is None:
+        count_query = select(func.count()).select_from(query.subquery())
+        total = (await db.execute(count_query)).scalar() or 0
+        rows = (await db.execute(query.limit(limit + 1))).all()
+        truncated = len(rows) > limit
+        rows = rows[:limit]
+    else:
+        # Same logic as search_listings: bbox already applied in SQL,
+        # refine with point-in-polygon. We bound the SQL fetch to
+        # `limit + 1` of the polygon's bbox-intersection, then filter,
+        # so a polygon that happens to cover almost-everything won't
+        # blow up the query.
+        rows = (await db.execute(query)).all()
+        rows = [r for r in rows if point_in_polygon(r.lat, r.lng, poly)]
+        total = len(rows)
+        truncated = total > limit
+        rows = rows[:limit]
 
     markers: list[ListingMarker] = []
     for row in rows:

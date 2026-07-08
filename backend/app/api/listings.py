@@ -56,6 +56,7 @@ async def list_listings(
     lng: float | None = None,
     radius_km: float | None = None,
     bbox: str | None = None,
+    polygon: str | None = None,
     sort: str = "newest",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -74,7 +75,7 @@ async def list_listings(
         floor_min=floor_min, floor_max=floor_max,
         price_per_sqm_min=price_per_sqm_min, price_per_sqm_max=price_per_sqm_max,
         year_built_min=year_built_min, year_built_max=year_built_max,
-        lat=lat, lng=lng, radius_km=radius_km, bbox=bbox,
+        lat=lat, lng=lng, radius_km=radius_km, bbox=bbox, polygon=polygon,
         sort=sort, page=page, page_size=page_size,
     )
     return await search_listings(db, params)
@@ -111,6 +112,7 @@ async def list_listing_markers(
     year_built_min: int | None = None,
     year_built_max: int | None = None,
     bbox: str | None = None,
+    polygon: str | None = None,
     limit: int = Query(default=2000, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
 ) -> ListingMarkersResponse:
@@ -127,7 +129,7 @@ async def list_listing_markers(
         floor_min=floor_min, floor_max=floor_max,
         price_per_sqm_min=price_per_sqm_min, price_per_sqm_max=price_per_sqm_max,
         year_built_min=year_built_min, year_built_max=year_built_max,
-        bbox=bbox,
+        bbox=bbox, polygon=polygon,
     )
     return await get_listing_markers(db, params, limit=limit)
 
@@ -157,6 +159,8 @@ async def get_listing(listing_id: str, db: AsyncSession = Depends(get_db)) -> Li
         title=listing.title,
         description=listing.description,
         price=listing.price,
+        price_previous=listing.price_previous,
+        price_changed_at=listing.price_changed_at,
         price_per_sqm=listing.price_per_sqm,
         area_sqm=listing.area_sqm,
         rooms=listing.rooms,
@@ -211,7 +215,8 @@ async def similar_listings(
     return [
         ListingResponse(
             id=l.id, title=l.title, description=l.description,
-            price=l.price, price_per_sqm=l.price_per_sqm, area_sqm=l.area_sqm,
+            price=l.price, price_previous=l.price_previous, price_changed_at=l.price_changed_at,
+            price_per_sqm=l.price_per_sqm, area_sqm=l.area_sqm,
             rooms=l.rooms, bedrooms=l.bedrooms, bathrooms=l.bathrooms,
             floor=l.floor, total_floors=l.total_floors,
             address=l.address, city=l.city, zone=l.zone, province=l.province,

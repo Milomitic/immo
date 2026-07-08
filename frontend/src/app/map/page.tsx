@@ -1,15 +1,35 @@
 "use client";
 
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useQueryState, parseAsString } from "nuqs";
 import { useMapMarkers } from "@/hooks/useListings";
 import { formatArea, formatPrice, roomsLabel } from "@/lib/utils";
-import { Building2, MapPin } from "lucide-react";
+import { Building2, List as ListIcon, MapPin, Pencil, X, Check } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import type { ListingSearchParams } from "@/lib/types";
 import { useListingFilters } from "@/components/search/FilterFields";
 import { MapFilters } from "@/components/map/MapFilters";
+import { ActiveFilters } from "@/components/search/ActiveFilters";
+
+/**
+ * Encode/decode the polygon URL param. Format: "lat,lng;lat,lng;...".
+ * Vertices are stored to 5 decimals — about 1 m of resolution, plenty
+ * for a hand-drawn perimeter and keeps the URL short.
+ */
+function encodePolygon(points: [number, number][]): string {
+  return points.map(([la, ln]) => `${la.toFixed(5)},${ln.toFixed(5)}`).join(";");
+}
+function decodePolygon(s: string | null): [number, number][] | null {
+  if (!s) return null;
+  const pts: [number, number][] = [];
+  for (const chunk of s.split(";")) {
+    const [la, ln] = chunk.split(",").map(parseFloat);
+    if (Number.isFinite(la) && Number.isFinite(ln)) pts.push([la, ln]);
+  }
+  return pts.length >= 3 ? pts : null;
+}
 
 const MapView = dynamic(() => import("@/components/map/MapView"), {
   ssr: false,
@@ -41,7 +61,64 @@ export default function MapPage() {
 function MapPageContent() {
   const { values, setters } = useListingFilters();
   const [bbox, setBbox] = useQueryState("bbox", parseAsString);
+  const [polygonStr, setPolygonStr] = useQueryState("polygon", parseAsString);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Build a /search href that carries every current filter param. ``bbox``
+  // is intentionally excluded — the search list shouldn't be clipped to
+  // whatever viewport the user happens to have on the map.
+  const searchParams = useSearchParams();
+  const searchHref = useMemo(() => {
+    const out = new URLSearchParams();
+    searchParams.forEach((v, k) => {
+      if (k !== "bbox") out.set(k, v);
+    });
+    return `/search${out.size > 0 ? `?${out.toString()}` : ""}`;
+  }, [searchParams]);
+
+  // --- Drawing state (local; only the *finalised* polygon goes in URL).
+  const [drawingMode, setDrawingMode] = useState(false);
+  const [drawingPoints, setDrawingPoints] = useState<[number, number][]>([]);
+
+  const polygon = useMemo(() => decodePolygon(polygonStr), [polygonStr]);
+
+  const handleAddVertex = useCallback((latlng: [number, number]) => {
+    setDrawingPoints((prev) => [...prev, latlng]);
+  }, []);
+
+  const handleStartDrawing = useCallback(() => {
+    setDrawingMode(true);
+    setDrawingPoints([]);
+    // Clear any previous polygon so the user starts from a clean slate.
+    setPolygonStr(null);
+  }, [setPolygonStr]);
+
+  const handleFinishDrawing = useCallback(() => {
+    if (drawingPoints.length >= 3) {
+      setPolygonStr(encodePolygon(drawingPoints));
+    }
+    setDrawingMode(false);
+    setDrawingPoints([]);
+  }, [drawingPoints, setPolygonStr]);
+
+  const handleCancelDrawing = useCallback(() => {
+    setDrawingMode(false);
+    setDrawingPoints([]);
+  }, []);
+
+  const handleClearPolygon = useCallback(() => {
+    setPolygonStr(null);
+  }, [setPolygonStr]);
+
+  // Esc shortcut while drawing — quick cancel.
+  useEffect(() => {
+    if (!drawingMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleCancelDrawing();
+      else if (e.key === "Enter") handleFinishDrawing();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawingMode, handleCancelDrawing, handleFinishDrawing]);
 
   const params: ListingSearchParams & { limit: number } = {
     city: values.city || undefined,
@@ -64,7 +141,11 @@ function MapPageContent() {
     has_garage: values.hasGarage || undefined,
     has_garden: values.hasGarden || undefined,
     source_portal: values.sourcePortal || undefined,
-    bbox: bbox || undefined,
+    // When a polygon is set, send only the polygon — bbox would over-
+    // include and the server would have to filter it twice. The polygon's
+    // own bounding box is computed server-side as a SQL pre-filter.
+    bbox: polygon ? undefined : (bbox || undefined),
+    polygon: polygonStr || undefined,
     limit: 1000,
   };
 
@@ -129,13 +210,75 @@ function MapPageContent() {
           {/* All other filters live in this dropdown */}
           <MapFilters />
 
+          {/* Draw / Cancel-perimeter controls */}
+          {!drawingMode && !polygon && (
+            <button
+              onClick={handleStartDrawing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border)] text-xs font-medium hover:bg-[var(--muted)] transition-colors"
+              title="Disegna un perimetro per delimitare la ricerca"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Disegna area
+            </button>
+          )}
+          {drawingMode && (
+            <>
+              <button
+                onClick={handleFinishDrawing}
+                disabled={drawingPoints.length < 3}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+                title="Termina il disegno (Invio)"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Termina ({drawingPoints.length})
+              </button>
+              <button
+                onClick={handleCancelDrawing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border)] text-xs font-medium hover:bg-[var(--muted)] transition-colors"
+                title="Annulla (Esc)"
+              >
+                <X className="h-3.5 w-3.5" />
+                Annulla
+              </button>
+            </>
+          )}
+          {!drawingMode && polygon && (
+            <button
+              onClick={handleClearPolygon}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--primary)] text-[var(--primary)] text-xs font-semibold hover:bg-[var(--primary)]/5 transition-colors"
+              title="Rimuovi il perimetro"
+            >
+              <X className="h-3.5 w-3.5" />
+              Area disegnata
+            </button>
+          )}
+
           <span className="text-xs text-[var(--muted-foreground)] ml-auto">
-            {isLoading
+            {drawingMode
+              ? `Clicca sulla mappa per aggiungere vertici (min 3, Invio per terminare)`
+              : isLoading
               ? "Caricamento..."
               : `${data?.total ?? 0} annunci${
                   data?.truncated ? ` (primi ${markers.length})` : ""
                 }`}
           </span>
+
+          {/* Mirror of ResultsHeader's "Mappa" CTA — keeps /map ↔ /search
+              navigation symmetric, propagates filters (incl. polygon). */}
+          <Link
+            href={searchHref}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border)] text-xs font-medium hover:bg-[var(--muted)] transition-colors"
+            title="Vedi gli stessi annunci in lista"
+          >
+            <ListIcon className="h-3.5 w-3.5" />
+            Lista
+          </Link>
+        </div>
+        {/* Chip-bar with all active filters — same component used on
+            /search so chips look identical across views and an X removes
+            a single filter without dismissing the others. */}
+        <div className="mt-2">
+          <ActiveFilters />
         </div>
       </div>
 
@@ -208,6 +351,10 @@ function MapPageContent() {
             onViewportChange={handleViewportChange}
             selectedId={selectedId}
             onMarkerClick={handleMarkerClick}
+            drawingMode={drawingMode}
+            drawingPoints={drawingPoints}
+            polygon={polygon}
+            onAddVertex={handleAddVertex}
           />
         </div>
       </div>

@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -22,32 +22,100 @@ MAX_LISTING_AGE_DAYS = 60  # Skip listings older than 2 months
 PORTAL_PRIORITY = ["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "idealista"]
 
 
-async def get_fresh_source_ids(portal: str, fresh_hours: int) -> set[str]:
-    """Return source_ids for `portal` whose canonical row was refreshed
-    more recently than `fresh_hours`. Used to short-circuit detail-fetching
-    on re-runs. Also returns IDs from listing_sources (when a listing from
-    this portal attaches to a higher-priority canonical).
+async def get_known_source_ids(portal: str) -> set[str]:
+    """Return *every* source_id we've ever recorded for ``portal`` —
+    canonical listings plus secondary sources (when this portal's listing
+    attached as a duplicate to a higher-priority canonical).
+
+    Used by spiders to skip the detail-page fetch on listings that are
+    already in the DB. Was previously time-windowed (``fresh_hours``) but
+    that meant every 6 hours we re-fetched everything and overwrote the
+    original snapshot via ``_update_listing``. We now treat the first
+    observation as immutable: once a listing is in the DB, subsequent
+    runs only bump its ``last_seen_at`` (so the
+    ``LISTING_INACTIVE_DAYS`` deactivation logic still works).
     """
-    if fresh_hours <= 0:
-        return set()
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=fresh_hours)).isoformat()
-    fresh: set[str] = set()
+    known: set[str] = set()
     async with async_session() as db:
         rows = await db.execute(
-            select(Listing.source_id).where(
-                Listing.source_portal == portal,
-                Listing.last_seen_at >= cutoff,
-            )
+            select(Listing.source_id).where(Listing.source_portal == portal)
         )
-        fresh.update(r[0] for r in rows if r[0])
+        known.update(r[0] for r in rows if r[0])
         src_rows = await db.execute(
-            select(ListingSource.source_id).where(
-                ListingSource.source_portal == portal,
-                ListingSource.last_seen_at >= cutoff,
-            )
+            select(ListingSource.source_id).where(ListingSource.source_portal == portal)
         )
-        fresh.update(r[0] for r in src_rows if r[0])
-    return fresh
+        known.update(r[0] for r in src_rows if r[0])
+    return known
+
+
+async def update_prices_from_observations(
+    portal: str,
+    observed: dict[str, float],
+) -> dict[str, int]:
+    """For known listings on this portal whose search-card price differs
+    from the stored price, rewrite ``price`` to the new value and stash
+    the previous one in ``price_previous`` plus a timestamp in
+    ``price_changed_at``. Listings whose price is unchanged are touched
+    only by the surrounding ``bump_last_seen`` call.
+
+    Why this lives here rather than re-using ``_update_listing``: that
+    function rewrites every field. We deliberately want a *minimal* diff
+    — only the price and the change-marker, leaving the rest of the
+    snapshot frozen. Returns ``{"changed": N, "checked": M}`` for
+    runner stats.
+    """
+    if not observed:
+        return {"changed": 0, "checked": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    checked = len(observed)
+    changed = 0
+    async with async_session() as db:
+        # Look up current prices for these ids in one shot — much cheaper
+        # than N round-trips.
+        rows = (
+            await db.execute(
+                select(Listing.id, Listing.source_id, Listing.price).where(
+                    Listing.source_portal == portal,
+                    Listing.source_id.in_(list(observed.keys())),
+                )
+            )
+        ).all()
+        for row_id, sid, current in rows:
+            new_price = observed.get(sid)
+            if new_price is None:
+                continue
+            # Treat anything within €1 as unchanged — accounts for
+            # rounding noise on the portal side (some show "165.000€"
+            # one day and "165.001€" the next due to formatting jitter).
+            if current is not None and abs(current - new_price) < 1.0:
+                continue
+            # Recompute price_per_sqm if we have area_sqm — cheap and keeps
+            # filters consistent.
+            await db.execute(
+                update(Listing)
+                .where(Listing.id == row_id)
+                .values(
+                    price=new_price,
+                    price_previous=current,
+                    price_changed_at=now,
+                    price_per_sqm=(
+                        Listing.price_per_sqm
+                    ),  # placeholder; recalculated below if area exists
+                )
+            )
+            changed += 1
+        # Recompute price_per_sqm in a second pass for the changed rows.
+        # SQL keeps it deterministic without round-tripping the area.
+        if changed:
+            await db.execute(
+                text(
+                    "UPDATE listings SET price_per_sqm = "
+                    "CASE WHEN area_sqm > 0 THEN ROUND(price / area_sqm, 2) ELSE NULL END "
+                    "WHERE source_portal = :portal AND price_changed_at = :now"
+                ).bindparams(portal=portal, now=now)
+            )
+        await db.commit()
+    return {"changed": changed, "checked": checked}
 
 
 async def bump_last_seen(portal: str, source_ids: list[str]) -> None:

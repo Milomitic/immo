@@ -21,6 +21,19 @@ class ScrapeRun(Base):
     error_details: Mapped[str | None] = mapped_column(Text)  # JSON array
     config: Mapped[str | None] = mapped_column(Text)  # JSON
 
+    # Live progress fields — written by a background ticker inside
+    # run_spider, polled by the frontend toast to render an ETA bar.
+    # ``last_progress_at`` doubles as a heartbeat: if it goes stale the
+    # UI can flag the run as frozen / orphaned without touching status.
+    progress_done: Mapped[int | None] = mapped_column(Integer)
+    progress_total: Mapped[int | None] = mapped_column(Integer)
+    phase: Mapped[str | None] = mapped_column(Text)  # search | fetch | done | failed
+    last_progress_at: Mapped[str | None] = mapped_column(Text)
+    # All per-portal runs spawned by one ``run_all_spiders`` invocation
+    # share a job_id. The status endpoint groups by the most-recent
+    # job_id so distinct jobs never bleed into one aggregate.
+    job_id: Mapped[str | None] = mapped_column(Text)
+
 
 class Favorite(Base):
     __tablename__ = "favorites"

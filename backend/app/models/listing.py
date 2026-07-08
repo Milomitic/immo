@@ -60,6 +60,15 @@ class Listing(Base):
     has_garage: Mapped[bool | None] = mapped_column(Boolean)
     has_garden: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Price-change tracking. We re-check the listed price on every scrape
+    # (cheap — read from the search-results page, no detail-page fetch).
+    # If it differs from what's stored, ``price`` is rewritten to the new
+    # value, ``price_previous`` keeps the prior value and
+    # ``price_changed_at`` stamps the moment, so the UI can show
+    # "ridotto" / "aumentato" badges.
+    price_previous: Mapped[float | None] = mapped_column(Float)
+    price_changed_at: Mapped[str | None] = mapped_column(Text)
+
     # Extra
     condominium_fees: Mapped[float | None] = mapped_column(Float)
     year_built: Mapped[int | None] = mapped_column(Integer)

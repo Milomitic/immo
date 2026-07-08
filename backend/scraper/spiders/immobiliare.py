@@ -68,7 +68,7 @@ class ImmobiliareSpider(BaseSpider):
         self.progress.set_phase("search")
 
         paths = self._PATHS.get(params.listing_type, self._PATHS["sale"])
-        fresh_ids = params.fresh_source_ids or set()
+        known_ids = params.known_source_ids or set()
 
         all_items: list = []
         for path_idx, path_template in enumerate(paths, start=1):
@@ -112,17 +112,24 @@ class ImmobiliareSpider(BaseSpider):
                     f"path {path_idx}/{len(paths)} pag {page}/{total_pages} ({len(all_items)} url)"
                 )
 
-        # Fresh-skip
+        # Skip listings that are already in the DB — first snapshot is
+        # immutable, we only bump last_seen_at via the runner. The search
+        # JSON also carries the *current* price for every result, so we
+        # capture that for known listings too: the runner will diff it
+        # against the stored price and mark changes — no detail-page
+        # round-trip needed.
         to_yield = []
         for it in all_items:
-            if it.source_id and it.source_id in fresh_ids:
-                self.fresh_skipped_ids.append(it.source_id)
+            if it.source_id and it.source_id in known_ids:
+                self.known_skipped_ids.append(it.source_id)
+                if it.price is not None:
+                    self.observed_prices[it.source_id] = it.price
             else:
                 to_yield.append(it)
 
-        if self.fresh_skipped_ids:
-            logger.info("fresh_skipped", portal=self.portal_name,
-                        count=len(self.fresh_skipped_ids), will_yield=len(to_yield))
+        if self.known_skipped_ids:
+            logger.info("known_skipped", portal=self.portal_name,
+                        count=len(self.known_skipped_ids), will_yield=len(to_yield))
 
         # Phase 2: parallel enrichment of publication_date for items missing
         # it. Updates the progress bar in-place.
@@ -138,20 +145,29 @@ class ImmobiliareSpider(BaseSpider):
         logger.info("spider_done", portal=self.portal_name, total=len(to_yield))
 
     async def _enrich_all(self, items: list[ListingItem]) -> int:
-        """Fill publication_date for items that don't already have one.
+        """Enrich items with data only the per-listing JSON exposes.
 
         Hits `/_next/data/{buildId}/annunci/{id}.json` — a lightweight SSR
-        JSON endpoint, much cheaper than the HTML detail page. Bypasses the
-        search-page rate limiter and fans out to _ENRICH_CONCURRENCY in-flight
-        requests. Failures are swallowed: publication_date is a nice-to-have,
-        not a blocker.
+        JSON endpoint, much cheaper than the HTML detail page. The search
+        results don't carry ``publication_date`` for every item nor any
+        floor plans (``multimedia.floorplans`` only appears in the per-
+        listing payload), so we fan out one request per item missing
+        either field. Bypasses the search-page rate limiter and fans out
+        to _ENRICH_CONCURRENCY in-flight requests. Failures are swallowed:
+        enrichment is best-effort.
 
-        Returns how many items were successfully enriched.
+        Returns how many items had at least one field populated.
         """
         import structlog
         logger = structlog.get_logger()
 
-        pending = [it for it in items if not it.publication_date and it.source_id]
+        # Enrich anything we don't already have. Items in `items` are
+        # already filtered to the new (not-yet-known) ones by the caller,
+        # so this is naturally bounded.
+        pending = [
+            it for it in items
+            if it.source_id and (not it.publication_date or not it.floor_plans)
+        ]
         if not pending or not self._build_id:
             return 0
 
@@ -179,7 +195,11 @@ class ImmobiliareSpider(BaseSpider):
         return ok
 
     async def _enrich_one(self, client, item: ListingItem) -> bool:
-        """Fetch one listing's JSON and set item.publication_date if possible."""
+        """Pull publication_date and floor plans off the per-listing JSON.
+
+        Returns ``True`` if at least one field was populated, ``False``
+        on any error (404, malformed JSON, missing fields).
+        """
         url = f"{self.base_url}/_next/data/{self._build_id}/annunci/{item.source_id}.json"
         try:
             resp = await client.get(url, timeout=_ENRICH_TIMEOUT)
@@ -200,15 +220,42 @@ class ImmobiliareSpider(BaseSpider):
         )
         if not isinstance(re_data, dict):
             return False
-        created = (
-            re_data.get("createdAt")
-            or re_data.get("dateAdded")
-        )
-        iso = self._coerce_date(created)
-        if iso:
-            item.publication_date = iso
-            return True
-        return False
+
+        touched = False
+
+        # Publication date — search JSON sometimes carries it, sometimes
+        # not. Detail JSON is more reliable.
+        if not item.publication_date:
+            created = re_data.get("createdAt") or re_data.get("dateAdded")
+            iso = self._coerce_date(created)
+            if iso:
+                item.publication_date = iso
+                touched = True
+
+        # Floor plans live under ``properties[*].multimedia.floorplans``
+        # with the same {urls: {large, medium, ...}} shape as photos.
+        # Search JSON only carries ``photos``, not ``floorplans``.
+        if not item.floor_plans:
+            props = re_data.get("properties", []) or []
+            main_prop = next((p for p in props if p.get("isMain")), None) or (props[0] if props else None)
+            if main_prop:
+                fps = (main_prop.get("multimedia") or {}).get("floorplans") or []
+                plans: list[str] = []
+                for fp in fps:
+                    if not isinstance(fp, dict):
+                        continue
+                    urls = fp.get("urls") or {}
+                    plan_url = urls.get("large") or urls.get("medium") or urls.get("small")
+                    if plan_url:
+                        # Same xxs-c→m-c upgrade we apply to photos for
+                        # higher-quality output.
+                        plan_url = plan_url.replace("/xxs-c.", "/m-c.")
+                        plans.append(plan_url)
+                if plans:
+                    item.floor_plans = plans
+                    touched = True
+
+        return touched
 
     @staticmethod
     def _coerce_date(raw) -> str | None:

@@ -5,6 +5,7 @@ import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "l
 import type { Listing } from "@/lib/types";
 import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, timeAgo } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
+import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 
 interface ListingCardProps {
   listing: Listing;
@@ -70,9 +71,14 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
       <div className="p-4">
         {/* Price row */}
         <div className="flex items-baseline justify-between mb-1">
-          <span className="text-xl font-bold text-[var(--primary)]">
+          <span className="text-xl font-bold text-[var(--primary)] flex items-baseline gap-2">
             {formatPrice(listing.price)}
             {listing.listing_type === "rent" && listing.price ? <span className="text-sm font-normal">/mese</span> : ""}
+            <PriceChangeBadge
+              price={listing.price}
+              pricePrevious={listing.price_previous}
+              priceChangedAt={listing.price_changed_at}
+            />
           </span>
           {listing.price_per_sqm && (
             <span className="text-xs text-[var(--muted-foreground)]">
@@ -80,6 +86,12 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
             </span>
           )}
         </div>
+        {/* Previous price under the new price when changed */}
+        {listing.price_previous != null && listing.price != null && listing.price_previous !== listing.price && (
+          <div className="text-xs text-[var(--muted-foreground)] line-through -mt-1 mb-1">
+            {formatPrice(listing.price_previous)}
+          </div>
+        )}
 
         {/* Title */}
         <p className="text-sm font-medium text-[var(--foreground)] line-clamp-1 mb-1">

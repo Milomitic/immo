@@ -25,8 +25,19 @@ export function ActiveFilters() {
   const [hasGarage, setHasGarage] = useQueryState("has_garage", parseAsBoolean);
   const [hasGarden, setHasGarden] = useQueryState("has_garden", parseAsBoolean);
   const [sourcePortal, setSourcePortal] = useQueryState("source_portal", parseAsString);
+  const [polygon, setPolygon] = useQueryState("polygon", parseAsString);
 
   const filters: { label: string; clear: () => void }[] = [];
+
+  // Polygon chip first — it's the most "physical" filter, easy to
+  // forget you have it active when you switch views.
+  if (polygon) {
+    const vertexCount = polygon.split(";").filter(Boolean).length;
+    filters.push({
+      label: `Area disegnata (${vertexCount} pt)`,
+      clear: () => setPolygon(null),
+    });
+  }
 
   if (listingType) filters.push({ label: listingType === "sale" ? "Vendita" : "Affitto", clear: () => setListingType(null) });
   if (city) filters.push({ label: city.charAt(0).toUpperCase() + city.slice(1), clear: () => setCity(null) });

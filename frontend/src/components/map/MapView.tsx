@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, Polyline, CircleMarker, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Link from "next/link";
@@ -47,9 +47,11 @@ function emitBbox(map: L.Map, onChange: (bbox: string) => void) {
   onChange(`${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`);
 }
 
-function ViewportSync({ onChange }: ViewportSyncProps) {
+function ViewportSync({ onChange, enabled }: ViewportSyncProps & { enabled: boolean }) {
   const map = useMapEvents({
-    moveend: () => emitBbox(map, onChange),
+    moveend: () => {
+      if (enabled) emitBbox(map, onChange);
+    },
   });
 
   useEffect(() => {
@@ -57,12 +59,34 @@ function ViewportSync({ onChange }: ViewportSyncProps) {
     // Without invalidateSize + raf, getBounds() returns a zero-area point.
     const raf = requestAnimationFrame(() => {
       map.invalidateSize();
-      emitBbox(map, onChange);
+      if (enabled) emitBbox(map, onChange);
     });
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [enabled]);
 
+  return null;
+}
+
+/**
+ * Capture map clicks while drawing mode is on. Each click pushes a
+ * vertex into the parent's polygon-points state. Hooks into Leaflet's
+ * own click event so it doesn't conflict with marker clicks (Leaflet
+ * fires `click` on the map only when no marker swallowed it).
+ */
+function DrawClickCapture({
+  active,
+  onAddVertex,
+}: {
+  active: boolean;
+  onAddVertex: (latlng: [number, number]) => void;
+}) {
+  useMapEvents({
+    click: (e) => {
+      if (!active) return;
+      onAddVertex([e.latlng.lat, e.latlng.lng]);
+    },
+  });
   return null;
 }
 
@@ -73,6 +97,16 @@ interface MapViewProps {
   onViewportChange: (bbox: string) => void;
   selectedId?: string | null;
   onMarkerClick?: (id: string) => void;
+  /** When true the map captures clicks as polygon vertices instead
+      of acting normally; the bbox sync also pauses so panning while
+      drawing doesn't refetch. */
+  drawingMode?: boolean;
+  /** Vertices currently being drawn (live polygon preview). */
+  drawingPoints?: [number, number][];
+  /** Finalised polygon (the perimeter the search uses). */
+  polygon?: [number, number][] | null;
+  /** Called for each click on the map while drawingMode is true. */
+  onAddVertex?: (latlng: [number, number]) => void;
 }
 
 export default function MapView({
@@ -82,19 +116,56 @@ export default function MapView({
   onViewportChange,
   selectedId,
   onMarkerClick,
+  drawingMode = false,
+  drawingPoints = [],
+  polygon = null,
+  onAddVertex,
 }: MapViewProps) {
+  // Visual style for the drawn perimeter — same primary blue as the rest
+  // of the UI, slightly translucent so markers underneath stay readable.
+  const polyStyle = { color: "#1d4ed8", weight: 2, fillColor: "#1d4ed8", fillOpacity: 0.10 };
+  // Show either the in-progress polyline (drawing) or the closed polygon
+  // (set). When drawingMode is on, each click becomes a vertex; double
+  // click-to-finalize is handled in the parent via a button.
   return (
     <MapContainer
       center={center}
       zoom={zoom}
       scrollWheelZoom
-      style={{ width: "100%", height: "100%" }}
+      style={{
+        width: "100%",
+        height: "100%",
+        cursor: drawingMode ? "crosshair" : undefined,
+      }}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <ViewportSync onChange={onViewportChange} />
+      {/* While drawing we don't refetch on every pan — would be confusing. */}
+      <ViewportSync onChange={onViewportChange} enabled={!drawingMode} />
+      <DrawClickCapture active={drawingMode} onAddVertex={onAddVertex ?? (() => {})} />
+
+      {/* Closed polygon (filter is active) */}
+      {polygon && polygon.length >= 3 && (
+        <Polygon positions={polygon} pathOptions={polyStyle} />
+      )}
+
+      {/* In-progress drawing — polyline + vertex dots */}
+      {drawingMode && drawingPoints.length > 0 && (
+        <>
+          <Polyline positions={drawingPoints} pathOptions={{ color: "#1d4ed8", weight: 2, dashArray: "4 4" }} />
+          {drawingPoints.map((p, i) => (
+            <CircleMarker
+              key={i}
+              center={p}
+              radius={5}
+              pathOptions={{ color: "#1d4ed8", fillColor: "#ffffff", fillOpacity: 1, weight: 2 }}
+            />
+          ))}
+        </>
+      )}
+
       {markers.map((m) => (
         <Marker
           key={m.id}

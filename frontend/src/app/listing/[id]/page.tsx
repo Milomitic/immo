@@ -10,6 +10,7 @@ import {
 import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
 import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo } from "@/lib/utils";
 import { ListingCard } from "@/components/listings/ListingCard";
+import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
@@ -70,8 +71,13 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const images = listing.images || [];
+  const photos = listing.images || [];
   const floorPlans = listing.floor_plans || [];
+  // Planimetrie davanti, poi le foto. Single ordered array used for the
+  // main carousel + thumbnails; we still keep `floorPlans` separate for
+  // the "Planimetria" CTA that opens the lightbox filtered to plans.
+  const images = [...floorPlans, ...photos];
+  const isFloorPlanIndex = (i: number) => i < floorPlans.length;
   const lightboxImages = lightboxSource === "plans" ? floorPlans : images;
 
   return (
@@ -129,13 +135,20 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                   <span className="pointer-events-none absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/55 text-white text-xs opacity-0 group-hover/gallery:opacity-100 transition-opacity">
                     <Expand className="h-3.5 w-3.5" /> Ingrandisci
                   </span>
-                  {/* Planimetria button (only if floor plans exist) */}
-                  {floorPlans.length > 0 && (
+                  {/* Badge "Planimetria" when the current image IS a floor plan */}
+                  {isFloorPlanIndex(currentImage) && (
+                    <span className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold shadow-md">
+                      <MapIcon className="h-3.5 w-3.5" /> Planimetria
+                      {floorPlans.length > 1 ? ` ${currentImage + 1}/${floorPlans.length}` : ""}
+                    </span>
+                  )}
+                  {/* CTA "Vedi planimetrie" when on a photo and floor plans exist */}
+                  {!isFloorPlanIndex(currentImage) && floorPlans.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => openLightbox(0, "plans")}
+                      onClick={() => { setCurrentImage(0); }}
                       className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold shadow-md hover:opacity-90 transition-opacity"
-                      aria-label="Apri planimetria"
+                      aria-label="Vai alla planimetria"
                     >
                       <MapIcon className="h-3.5 w-3.5" /> Planimetria
                       {floorPlans.length > 1 ? ` (${floorPlans.length})` : ""}
@@ -172,9 +185,17 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                       <button
                         key={i}
                         onClick={() => { setCurrentImage(i); openLightbox(i, "photos"); }}
-                        className={`shrink-0 w-16 h-12 rounded-[var(--radius-sm)] overflow-hidden border-2 transition-colors ${i === currentImage ? "border-[var(--primary)]" : "border-transparent opacity-60 hover:opacity-100"}`}
+                        className={`relative shrink-0 w-16 h-12 rounded-[var(--radius-sm)] overflow-hidden border-2 transition-colors ${i === currentImage ? "border-[var(--primary)]" : "border-transparent opacity-60 hover:opacity-100"}`}
                       >
                         <img src={img} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                        {/* Marker on planimetry thumbnails so users know
+                            what they're clicking before the carousel
+                            advances. */}
+                        {isFloorPlanIndex(i) && (
+                          <span className="absolute bottom-0 left-0 right-0 bg-[var(--primary)]/90 text-[var(--primary-foreground)] text-[9px] font-bold leading-none py-0.5 text-center uppercase tracking-wide">
+                            Plan
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -195,9 +216,20 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="text-2xl font-bold text-[var(--primary)]">
+                  <div className="text-2xl font-bold text-[var(--primary)] flex items-baseline gap-2 justify-end">
                     {formatPrice(listing.price)}{listing.listing_type === "rent" ? <span className="text-base font-normal">/mese</span> : ""}
+                    <PriceChangeBadge
+                      price={listing.price}
+                      pricePrevious={listing.price_previous}
+                      priceChangedAt={listing.price_changed_at}
+                      size="md"
+                    />
                   </div>
+                  {listing.price_previous != null && listing.price != null && listing.price_previous !== listing.price && (
+                    <div className="text-sm text-[var(--muted-foreground)] line-through">
+                      {formatPrice(listing.price_previous)}
+                    </div>
+                  )}
                   {listing.price_per_sqm && (
                     <div className="text-sm text-[var(--muted-foreground)]">{formatPrice(listing.price_per_sqm)}/m&sup2;</div>
                   )}
