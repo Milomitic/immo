@@ -2,46 +2,25 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Home, Search, GitCompare, Heart, Map as MapIcon, Moon, Sun } from "lucide-react";
+import { Bell, Home, Search, GitCompare, Heart, Map as MapIcon, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { useAlerts } from "@/hooks/useAlerts";
 import { useFavoriteIds } from "@/hooks/useFavorites";
+import { FILTER_PARAM_KEYS, SINCE_PARAM_KEYS, VIEW_PARAM_KEYS, pickParams, toQueryString } from "@/lib/filterParams";
 
-// Filter-related params we want to carry across /search → /map navigation
-// so the user doesn't lose their selections when toggling views.
-// Note: ``bbox`` is intentionally NOT preserved — it's viewport-specific
-// to the map and would over-clip the search list. ``polygon`` *is*
-// preserved because it's a deliberate user-drawn perimeter.
-const PRESERVED_PARAMS = new Set([
-  "q", "city", "zone", "province",
-  "listing_type", "property_type",
-  "price_min", "price_max", "area_min", "area_max",
-  "rooms_min", "rooms_max", "bedrooms_min", "bathrooms_min",
-  "energy_class", "condition", "source_portal",
-  "has_elevator", "has_balcony", "has_terrace", "has_garage", "has_garden",
-  "floor_min", "floor_max",
-  "price_per_sqm_min", "price_per_sqm_max",
-  "year_built_min", "year_built_max",
-  "polygon",
-  "sort", "page_size",
-]);
-
-function preserveFilterQuery(searchParams: URLSearchParams): string {
-  const out = new URLSearchParams();
-  searchParams.forEach((v, k) => {
-    if (PRESERVED_PARAMS.has(k)) out.set(k, v);
-  });
-  const s = out.toString();
-  return s ? `?${s}` : "";
-}
+// Carried across /search ↔ /map so switching views keeps the selection.
+const PRESERVED_PARAMS = [...FILTER_PARAM_KEYS, ...SINCE_PARAM_KEYS, ...VIEW_PARAM_KEYS];
 
 export function Header() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const searchParams = useSearchParams();
-  const filterQs = preserveFilterQuery(new URLSearchParams(searchParams.toString()));
+  const filterQs = toQueryString(pickParams(new URLSearchParams(searchParams.toString()), PRESERVED_PARAMS));
   const { ids: favoriteIds } = useFavoriteIds();
+  const { data: alerts } = useAlerts();
+  const alertNews = (alerts ?? []).reduce((n, a) => n + a.new_count + a.price_drop_count, 0);
 
   return (
     <header className="border-b border-[var(--border)] bg-[var(--background)] sticky top-0 z-30">
@@ -79,6 +58,19 @@ export function Header() {
               {favoriteIds.size > 0 && (
                 <span className="min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-4 text-center">
                   {favoriteIds.size}
+                </span>
+              )}
+            </Link>
+            <Link
+              href="/alerts"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+              aria-label={alertNews > 0 ? `Ricerche salvate (${alertNews} novità)` : "Ricerche salvate"}
+            >
+              <Bell className="h-4 w-4" />
+              <span className="hidden sm:inline">Avvisi</span>
+              {alertNews > 0 && (
+                <span className="min-w-4 h-4 px-1 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold leading-4 text-center">
+                  {alertNews > 99 ? "99+" : alertNews}
                 </span>
               )}
             </Link>

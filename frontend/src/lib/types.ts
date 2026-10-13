@@ -59,6 +59,22 @@ export interface ListingDetail extends Listing {
   sources: ListingSource[];
 }
 
+/** A saved search: the /search filter params plus "what's new" counts. */
+export interface SearchAlert {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  /** E-mail digests on/off. */
+  is_active: boolean;
+  created_at: string;
+  /** "New" is relative to this: the last time the user looked. */
+  seen_at: string | null;
+  last_notified_at: string | null;
+  total: number;
+  new_count: number;
+  price_drop_count: number;
+}
+
 export interface Favorite {
   listing: Listing;
   created_at: string;
@@ -111,6 +127,10 @@ export interface ListingSearchParams {
   bbox?: string;
   /** User-drawn polygon: ``"lat,lng;lat,lng;...;lat,lng"`` (>=3 vertices). */
   polygon?: string;
+  /** ISO instant: only listings first seen after it. */
+  first_seen_after?: string;
+  /** ISO instant: only listings whose price dropped after it. */
+  price_drop_since?: string;
   sort?: string;
   page?: number;
   page_size?: number;

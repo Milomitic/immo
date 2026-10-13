@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Scraping
+    # Periodic scans are opt-in: every run hits the portals for a good while
+    # (and casa.it bans aggressive clients), so the backend never starts one
+    # on its own unless this is turned on.
+    SCRAPE_SCHEDULE_ENABLED: bool = False
     SCRAPE_INTERVAL_HOURS: int = 6
     SCRAPE_DEFAULT_CITY: str = "bari"
     SCRAPE_DEFAULT_LISTING_TYPE: str = "sale"
@@ -69,6 +73,18 @@ class Settings(BaseSettings):
     # If set, mutating endpoints (scrape trigger, …) require the header
     # ``X-Admin-Token: <value>``. Leave empty for local single-user use.
     ADMIN_TOKEN: str = ""
+
+    # Saved-search e-mail digests, sent after each scrape job. Optional:
+    # nothing is sent unless SMTP_HOST and ALERT_EMAIL_TO are both set.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_STARTTLS: bool = True
+    SMTP_FROM: str = ""
+    ALERT_EMAIL_TO: str = ""
+    # Where links in e-mails point.
+    FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(
         env_file=str(_PROJECT_ROOT / ".env"),

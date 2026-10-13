@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useQueryState, parseAsInteger, parseAsString } from "nuqs";
 import { LayoutGrid, List, Map as MapIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SaveSearchButton } from "./SaveSearchButton";
 
 interface ResultsHeaderProps {
   total: number;
@@ -58,6 +59,8 @@ export function ResultsHeader({ total, page, pageSize, isLoading }: ResultsHeade
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <SaveSearchButton />
+
           {/* Sort */}
           <select
             value={sort || "newest"}

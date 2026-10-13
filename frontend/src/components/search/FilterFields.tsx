@@ -78,6 +78,9 @@ export function useListingFilters() {
   const [hasGarage, setHasGarage] = useQueryState("has_garage", parseAsBoolean);
   const [hasGarden, setHasGarden] = useQueryState("has_garden", parseAsBoolean);
   const [sourcePortal, setSourcePortal] = useQueryState("source_portal", parseAsString);
+  // Set by saved-search links ("vedi i nuovi"); removable like any filter.
+  const [firstSeenAfter, setFirstSeenAfter] = useQueryState("first_seen_after", parseAsString);
+  const [priceDropSince, setPriceDropSince] = useQueryState("price_drop_since", parseAsString);
 
   const values = {
     city, zone, listingType, propertyType,
@@ -85,7 +88,7 @@ export function useListingFilters() {
     roomsMin, bathroomsMin, floorMin, floorMax,
     energyClass, condition,
     hasElevator, hasBalcony, hasTerrace, hasGarage, hasGarden,
-    sourcePortal,
+    sourcePortal, firstSeenAfter, priceDropSince,
   };
   const setters = {
     setCity, setZone, setListingType, setPropertyType,
@@ -93,7 +96,7 @@ export function useListingFilters() {
     setRoomsMin, setBathroomsMin, setFloorMin, setFloorMax,
     setEnergyClass, setCondition,
     setHasElevator, setHasBalcony, setHasTerrace, setHasGarage, setHasGarden,
-    setSourcePortal,
+    setSourcePortal, setFirstSeenAfter, setPriceDropSince,
   };
 
   const activeCount = Object.values(values).filter((v) => v !== null && v !== undefined).length;
@@ -104,7 +107,7 @@ export function useListingFilters() {
     setRoomsMin(null); setBathroomsMin(null); setFloorMin(null); setFloorMax(null);
     setEnergyClass(null); setCondition(null);
     setHasElevator(null); setHasBalcony(null); setHasTerrace(null); setHasGarage(null); setHasGarden(null);
-    setSourcePortal(null);
+    setSourcePortal(null); setFirstSeenAfter(null); setPriceDropSince(null);
   };
 
   return { values, setters, activeCount, clearAll };
@@ -140,6 +143,8 @@ export function filtersToParams(v: ListingFilterValues): ListingSearchParams {
     has_garage: v.hasGarage || undefined,
     has_garden: v.hasGarden || undefined,
     source_portal: v.sourcePortal || undefined,
+    first_seen_after: v.firstSeenAfter || undefined,
+    price_drop_since: v.priceDropSince || undefined,
   };
 }
 

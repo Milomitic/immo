@@ -59,6 +59,8 @@ async def list_listings(
     radius_km: float | None = None,
     bbox: str | None = None,
     polygon: str | None = None,
+    first_seen_after: str | None = None,
+    price_drop_since: str | None = None,
     sort: str = "newest",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -78,6 +80,7 @@ async def list_listings(
         price_per_sqm_min=price_per_sqm_min, price_per_sqm_max=price_per_sqm_max,
         year_built_min=year_built_min, year_built_max=year_built_max,
         lat=lat, lng=lng, radius_km=radius_km, bbox=bbox, polygon=polygon,
+        first_seen_after=first_seen_after, price_drop_since=price_drop_since,
         sort=sort, page=page, page_size=page_size,
     )
     return await search_listings(db, params)
@@ -115,6 +118,8 @@ async def list_listing_markers(
     year_built_max: int | None = None,
     bbox: str | None = None,
     polygon: str | None = None,
+    first_seen_after: str | None = None,
+    price_drop_since: str | None = None,
     limit: int = Query(default=2000, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
 ) -> ListingMarkersResponse:
@@ -132,6 +137,7 @@ async def list_listing_markers(
         price_per_sqm_min=price_per_sqm_min, price_per_sqm_max=price_per_sqm_max,
         year_built_min=year_built_min, year_built_max=year_built_max,
         bbox=bbox, polygon=polygon,
+        first_seen_after=first_seen_after, price_drop_since=price_drop_since,
     )
     return await get_listing_markers(db, params, limit=limit)
 

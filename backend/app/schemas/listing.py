@@ -115,6 +115,11 @@ class ListingSearchParams(BaseModel):
     # bounding-box pre-filter in SQL plus a point-in-polygon refinement in
     # Python — see services.listing_service.
     polygon: str | None = None
+    # ISO timestamps. "What's new since I last looked": listings first seen
+    # after the instant, or whose price dropped after it. Saved searches
+    # use them with their own watermark.
+    first_seen_after: str | None = None
+    price_drop_since: str | None = None
     sort: str = "newest"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

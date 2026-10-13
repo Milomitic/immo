@@ -4,6 +4,12 @@ import { useQueryState, parseAsInteger, parseAsString, parseAsBoolean } from "nu
 import { Badge } from "@/components/ui/Badge";
 import { formatPriceCompact, portalLabel, propertyTypeLabel } from "@/lib/utils";
 
+const dayMonth = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short" });
+const shortDate = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : dayMonth.format(d);
+};
+
 export function ActiveFilters() {
   const [city, setCity] = useQueryState("city", parseAsString);
   const [zone, setZone] = useQueryState("zone", parseAsString);
@@ -27,10 +33,14 @@ export function ActiveFilters() {
   const [sourcePortal, setSourcePortal] = useQueryState("source_portal", parseAsString);
   const [polygon, setPolygon] = useQueryState("polygon", parseAsString);
   const [q, setQ] = useQueryState("q", parseAsString);
+  const [firstSeenAfter, setFirstSeenAfter] = useQueryState("first_seen_after", parseAsString);
+  const [priceDropSince, setPriceDropSince] = useQueryState("price_drop_since", parseAsString);
 
   const filters: { label: string; clear: () => void }[] = [];
 
   if (q) filters.push({ label: `Testo: "${q}"`, clear: () => setQ(null) });
+  if (firstSeenAfter) filters.push({ label: `Nuovi dal ${shortDate(firstSeenAfter)}`, clear: () => setFirstSeenAfter(null) });
+  if (priceDropSince) filters.push({ label: `Ribassi dal ${shortDate(priceDropSince)}`, clear: () => setPriceDropSince(null) });
 
   // Polygon chip first — it's the most "physical" filter, easy to
   // forget you have it active when you switch views.

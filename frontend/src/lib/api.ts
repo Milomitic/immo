@@ -6,6 +6,7 @@ import type {
   PaginatedListings,
   PricePoint,
   ScrapeStatus,
+  SearchAlert,
   ScrapeTriggerResponse,
   Stats,
   Listing,
@@ -92,6 +93,29 @@ export async function saveFavorite(listingId: string): Promise<Favorite> {
 
 export async function removeFavorite(listingId: string): Promise<void> {
   return fetchApi<void>(`/favorites/${listingId}`, { method: "DELETE" });
+}
+
+export async function fetchAlerts(): Promise<SearchAlert[]> {
+  return fetchApi<SearchAlert[]>(`/alerts`);
+}
+
+export async function createAlert(name: string, filters: Record<string, string>): Promise<SearchAlert> {
+  return fetchApi<SearchAlert>(`/alerts`, { method: "POST", body: JSON.stringify({ name, filters }) });
+}
+
+export async function updateAlert(
+  id: string,
+  patch: { name?: string; is_active?: boolean },
+): Promise<SearchAlert> {
+  return fetchApi<SearchAlert>(`/alerts/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export async function markAlertSeen(id: string): Promise<SearchAlert> {
+  return fetchApi<SearchAlert>(`/alerts/${id}/seen`, { method: "POST" });
+}
+
+export async function deleteAlert(id: string): Promise<void> {
+  return fetchApi<void>(`/alerts/${id}`, { method: "DELETE" });
 }
 
 export async function fetchStats(): Promise<Stats> {

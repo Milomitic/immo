@@ -13,6 +13,7 @@ import structlog
 from app.config import settings
 from app.database import async_session, init_db
 from app.models.scrape_run import ScrapeError, ScrapeRun
+from app.services.alert_service import send_alert_digest
 from app.services.scrape_service import enabled_portals
 from app.utils.logging import setup_logging
 from scraper.pipeline import (
@@ -455,6 +456,16 @@ async def main(portal: str | None = None, city: str | None = None) -> None:
         await run_spider(portal, target_city, listing_type)
     else:
         await run_all_spiders(target_city, listing_type)
+
+    # Saved-search digest (no-op unless SMTP is configured). A mail failure
+    # must not turn a good scrape into a failed process.
+    try:
+        sent = await send_alert_digest()
+        if sent:
+            sys.stderr.write(f"Avvisi: e-mail inviata per {sent} ricerche salvate.\n")
+    except Exception as e:
+        logger.exception("alert_digest_failed")
+        sys.stderr.write(f"Avvisi: invio e-mail fallito ({e}).\n")
 
 
 if __name__ == "__main__":

@@ -63,13 +63,3 @@ class ScrapeError(Base):
         Index("idx_scrape_errors_portal_time", "portal", "created_at"),
     )
 
-
-class SearchAlert(Base):
-    __tablename__ = "search_alerts"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
-    name: Mapped[str | None] = mapped_column(Text)
-    filters: Mapped[str | None] = mapped_column(Text)  # JSON
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_notified_at: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(Text, default=_now)

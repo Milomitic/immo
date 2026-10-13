@@ -189,6 +189,13 @@ def _apply_listing_filters(query, params: ListingSearchParams, use_fts: bool = F
         query = query.where(Listing.year_built >= params.year_built_min)
     if params.year_built_max is not None:
         query = query.where(Listing.year_built <= params.year_built_max)
+    if params.first_seen_after:
+        query = query.where(Listing.first_seen_at > params.first_seen_after)
+    if params.price_drop_since:
+        query = query.where(
+            Listing.price_changed_at > params.price_drop_since,
+            Listing.price < Listing.price_previous,
+        )
 
     # Floor filtering (floor is TEXT: "1","2","T","R","S", etc.)
     if params.floor_min is not None or params.floor_max is not None:
