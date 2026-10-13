@@ -8,8 +8,9 @@ import {
   Fence, Home, Expand, Map as MapIcon,
 } from "lucide-react";
 import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo, imageVariant } from "@/lib/utils";
 import { ListingCard } from "@/components/listings/ListingCard";
+import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
@@ -79,7 +80,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
   // the "Planimetria" CTA that opens the lightbox filtered to plans.
   const images = [...floorPlans, ...photos];
   const isFloorPlanIndex = (i: number) => i < floorPlans.length;
-  const lightboxImages = lightboxSource === "plans" ? floorPlans : images;
+  const lightboxImages = (lightboxSource === "plans" ? floorPlans : images).map((u) => imageVariant(u, "full"));
 
   return (
     <>
@@ -129,7 +130,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                     aria-label="Ingrandisci foto"
                   >
                     <div className="aspect-[16/10]">
-                      <img src={images[currentImage]} alt={`Foto ${currentImage + 1}`} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                      <img src={imageVariant(images[currentImage], "full")} alt={`Foto ${currentImage + 1}`} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     </div>
                   </button>
                   {/* Expand hint */}
@@ -188,7 +189,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                         onClick={() => { setCurrentImage(i); openLightbox(i, "photos"); }}
                         className={`relative shrink-0 w-16 h-12 rounded-[var(--radius-sm)] overflow-hidden border-2 transition-colors ${i === currentImage ? "border-[var(--primary)]" : "border-transparent opacity-60 hover:opacity-100"}`}
                       >
-                        <img src={img} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                        <img src={imageVariant(img, "card")} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                         {/* Marker on planimetry thumbnails so users know
                             what they're clicking before the carousel
                             advances. */}
@@ -208,7 +209,10 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             <div ref={priceRef}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-xl sm:text-2xl font-bold">{listing.title}</h1>
+                  <div className="flex items-start gap-2">
+                    <h1 className="text-xl sm:text-2xl font-bold">{listing.title}</h1>
+                    <FavoriteButton listingId={listing.id} size="md" className="shrink-0 border border-[var(--border)]" />
+                  </div>
                   {(listing.address || listing.zone) && (
                     <div className="flex items-center gap-1.5 mt-1.5 text-[var(--muted-foreground)] text-sm">
                       <MapPin className="h-4 w-4 shrink-0" />

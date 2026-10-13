@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.favorites import router as favorites_router
 from app.api.listings import router as listings_router
 from app.api.scrape import router as scrape_router
 from app.api.stats import router as stats_router
@@ -32,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_ROUTERS = (listings_router, scrape_router, stats_router)
+_ROUTERS = (listings_router, favorites_router, scrape_router, stats_router)
 
 # /api/v1 is the canonical, documented API. /api is kept as an unversioned
 # alias so older clients and bookmarked URLs keep working; it's hidden from

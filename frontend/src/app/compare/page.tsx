@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { fetchListing } from "@/lib/api";
 import type { ListingDetail } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, floorLabel, conditionLabel, energyClassColor } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, floorLabel, conditionLabel, energyClassColor, imageVariant } from "@/lib/utils";
 import { ArrowLeft, CheckCircle2, XCircle, Minus, Search } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
@@ -103,7 +103,7 @@ function CompareContent() {
                 <th key={listing!.id} className="p-4 text-left min-w-[200px]">
                   <div className="space-y-2">
                     {listing!.images[0] && (
-                      <img src={listing!.images[0]} alt="" referrerPolicy="no-referrer" className="w-full h-32 object-cover rounded-[var(--radius-md)]" />
+                      <img src={imageVariant(listing!.images[0], "card")} alt="" referrerPolicy="no-referrer" className="w-full h-32 object-cover rounded-[var(--radius-md)]" />
                     )}
                     <Link href={`/listing/${listing!.id}`} className="text-sm font-semibold hover:text-[var(--primary)] line-clamp-2 block transition-colors">
                       {listing!.title}

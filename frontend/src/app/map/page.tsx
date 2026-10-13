@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useQueryState, parseAsString } from "nuqs";
 import { useMapMarkers } from "@/hooks/useListings";
-import { formatArea, formatPrice, roomsLabel } from "@/lib/utils";
+import { formatArea, formatPrice, imageVariant, roomsLabel } from "@/lib/utils";
 import { Building2, List as ListIcon, MapPin, Pencil, X, Check } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import type { ListingSearchParams } from "@/lib/types";
@@ -290,7 +290,7 @@ function MapPageContent() {
               <div className="w-24 h-20 shrink-0 rounded-[var(--radius-sm)] overflow-hidden bg-[var(--muted)]">
                 {m.thumbnail ? (
                   <img
-                    src={m.thumbnail}
+                    src={imageVariant(m.thumbnail, "card")}
                     alt=""
                     referrerPolicy="no-referrer"
                     loading="lazy"

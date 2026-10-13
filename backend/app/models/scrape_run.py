@@ -64,15 +64,6 @@ class ScrapeError(Base):
     )
 
 
-class Favorite(Base):
-    __tablename__ = "favorites"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
-    listing_id: Mapped[str] = mapped_column(Text, nullable=False)
-    notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(Text, default=_now)
-
-
 class SearchAlert(Base):
     __tablename__ = "search_alerts"
 

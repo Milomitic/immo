@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
+import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 
 interface ListingCardProps {
@@ -19,53 +20,55 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
 
   return (
     <div className="group rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--background)] overflow-hidden transition-shadow duration-200 hover:shadow-[var(--card-hover-shadow)]">
-      {/* Image */}
-      <Link href={`/listing/${listing.id}`}>
-        <div className="relative aspect-[4/3] bg-[var(--muted)] overflow-hidden">
-          {firstImage ? (
-            <img
-              src={firstImage}
-              alt={listing.title}
-              referrerPolicy="no-referrer"
-              loading="lazy"
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-[var(--muted-foreground)]">
-              <Building2 className="h-12 w-12 opacity-40" />
-            </div>
-          )}
-
-          {/* Top-left badges */}
-          <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-            <Badge variant="primary" size="sm" className={portalColor(listing.source_portal)}>
-              {portalLabel(listing.source_portal)}
-            </Badge>
-            {isNewListing(listing.first_seen_at) && (
-              <Badge variant="warning" size="sm">Nuovo</Badge>
+      {/* Image. The heart sits beside the link, not inside it: a button
+          nested in an <a> is invalid and confuses screen readers. */}
+      <div className="relative">
+        <Link href={`/listing/${listing.id}`}>
+          <div className="relative aspect-[4/3] bg-[var(--muted)] overflow-hidden">
+            {firstImage ? (
+              <img
+                src={imageVariant(firstImage, "card")}
+                alt={listing.title}
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[var(--muted-foreground)]">
+                <Building2 className="h-12 w-12 opacity-40" />
+              </div>
             )}
-          </div>
 
-          {/* Top-right: multi-source */}
-          {listing.source_count > 1 && (
-            <Badge variant="default" size="sm" className="absolute top-2.5 right-2.5 bg-purple-600 text-white">
-              <Layers className="h-3 w-3" /> {listing.source_count} fonti
-            </Badge>
-          )}
+            {/* Top-left badges */}
+            <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
+              <Badge variant="primary" size="sm" className={portalColor(listing.source_portal)}>
+                {portalLabel(listing.source_portal)}
+              </Badge>
+              {isNewListing(listing.first_seen_at) && (
+                <Badge variant="warning" size="sm">Nuovo</Badge>
+              )}
+              {listing.source_count > 1 && (
+                <Badge variant="default" size="sm" className="bg-purple-600 text-white">
+                  <Layers className="h-3 w-3" /> {listing.source_count} fonti
+                </Badge>
+              )}
+            </div>
 
-          {/* Bottom-right: photo count */}
-          {photoCount > 1 && (
-            <span className="absolute bottom-2.5 right-2.5 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-white text-[11px] font-medium">
-              <Camera className="h-3 w-3" /> {photoCount}
+            {/* Bottom-right: photo count */}
+            {photoCount > 1 && (
+              <span className="absolute bottom-2.5 right-2.5 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-white text-[11px] font-medium">
+                <Camera className="h-3 w-3" /> {photoCount}
+              </span>
+            )}
+
+            {/* Bottom-left: listing type */}
+            <span className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-black/60 text-white">
+              {listing.listing_type === "rent" ? "Affitto" : "Vendita"}
             </span>
-          )}
-
-          {/* Bottom-left: listing type */}
-          <span className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-black/60 text-white">
-            {listing.listing_type === "rent" ? "Affitto" : "Vendita"}
-          </span>
-        </div>
-      </Link>
+          </div>
+        </Link>
+        <FavoriteButton listingId={listing.id} className="absolute top-2.5 right-2.5" />
+      </div>
 
       {/* Content */}
       <div className="p-4">

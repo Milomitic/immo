@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Home, Search, GitCompare, Map as MapIcon, Moon, Sun } from "lucide-react";
+import { Home, Search, GitCompare, Heart, Map as MapIcon, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { useFavoriteIds } from "@/hooks/useFavorites";
 
 // Filter-related params we want to carry across /search → /map navigation
 // so the user doesn't lose their selections when toggling views.
@@ -40,6 +41,7 @@ export function Header() {
   useEffect(() => setMounted(true), []);
   const searchParams = useSearchParams();
   const filterQs = preserveFilterQuery(new URLSearchParams(searchParams.toString()));
+  const { ids: favoriteIds } = useFavoriteIds();
 
   return (
     <header className="border-b border-[var(--border)] bg-[var(--background)] sticky top-0 z-30">
@@ -66,6 +68,19 @@ export function Header() {
             >
               <MapIcon className="h-4 w-4" />
               <span className="hidden sm:inline">Mappa</span>
+            </Link>
+            <Link
+              href="/favorites"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+              aria-label={`Preferiti (${favoriteIds.size})`}
+            >
+              <Heart className="h-4 w-4" />
+              <span className="hidden sm:inline">Preferiti</span>
+              {favoriteIds.size > 0 && (
+                <span className="min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-4 text-center">
+                  {favoriteIds.size}
+                </span>
+              )}
             </Link>
             <Link
               href="/compare"

@@ -1,4 +1,5 @@
 import type {
+  Favorite,
   ListingDetail,
   ListingMarkersResponse,
   ListingSearchParams,
@@ -33,6 +34,7 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   if (ADMIN_TOKEN && init?.method && init.method !== "GET") headers["X-Admin-Token"] = ADMIN_TOKEN;
 
   const res = await fetch(`${API_ROOT}${path}`, { ...init, headers });
+  if (res.status === 204) return undefined as T;
   if (!res.ok) {
     let detail = `Errore API ${res.status}`;
     try {
@@ -74,6 +76,22 @@ export async function fetchSimilarListings(id: string): Promise<Listing[]> {
 
 export async function fetchPriceHistory(id: string): Promise<PricePoint[]> {
   return fetchApi<PricePoint[]>(`/listings/${id}/price-history`);
+}
+
+export async function fetchFavorites(): Promise<Favorite[]> {
+  return fetchApi<Favorite[]>(`/favorites`);
+}
+
+export async function fetchFavoriteIds(): Promise<string[]> {
+  return fetchApi<string[]>(`/favorites/ids`);
+}
+
+export async function saveFavorite(listingId: string): Promise<Favorite> {
+  return fetchApi<Favorite>(`/favorites/${listingId}`, { method: "PUT" });
+}
+
+export async function removeFavorite(listingId: string): Promise<void> {
+  return fetchApi<void>(`/favorites/${listingId}`, { method: "DELETE" });
 }
 
 export async function fetchStats(): Promise<Stats> {

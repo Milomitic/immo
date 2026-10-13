@@ -4,8 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.database as database
-import app.models.listing  # noqa: F401  (register tables on Base.metadata)
-import app.models.scrape_run  # noqa: F401
+import app.models  # noqa: F401  (registers every table on Base.metadata)
 import scraper.pipeline  # noqa: F401  (imports async_session by name — must be patched)
 from app.database import Base
 from app.models.listing import Listing

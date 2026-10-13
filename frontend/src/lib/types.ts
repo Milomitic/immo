@@ -59,6 +59,11 @@ export interface ListingDetail extends Listing {
   sources: ListingSource[];
 }
 
+export interface Favorite {
+  listing: Listing;
+  created_at: string;
+}
+
 /** One observed price, oldest first in /price-history. */
 export interface PricePoint {
   price: number;

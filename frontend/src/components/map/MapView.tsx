@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Polygon, Polyline, CircleMarker, Popup, useMapEvents } from "react-leaflet";
+import { useEffect, useMemo, useState } from "react";
+import { MapContainer, TileLayer, Marker, Polygon, Polyline, CircleMarker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Link from "next/link";
+import Supercluster from "supercluster";
 import type { ListingMarker } from "@/lib/types";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, imageVariant } from "@/lib/utils";
 
 L.Icon.Default.mergeOptions({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
@@ -21,17 +22,176 @@ function shortPrice(price: number | null): string {
   return `€${price}`;
 }
 
+// Icons are re-requested on every pan; reusing the instances lets Leaflet
+// skip rebuilding the DOM of markers whose icon didn't change.
+const iconCache = new Map<string, L.DivIcon>();
+
+function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
+  let icon = iconCache.get(key);
+  if (!icon) {
+    icon = make();
+    iconCache.set(key, icon);
+  }
+  return icon;
+}
+
 function createPriceIcon(price: number | null, highlighted: boolean): L.DivIcon {
   const label = shortPrice(price);
-  const bg = highlighted ? "#0f172a" : "#ffffff";
-  const fg = highlighted ? "#ffffff" : "#0f172a";
-  const border = highlighted ? "#0f172a" : "#d4d4d8";
-  return L.divIcon({
-    className: "",
-    html: `<div style="background:${bg};color:${fg};border:1px solid ${border};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.25);white-space:nowrap;font-family:system-ui,sans-serif">${label}</div>`,
-    iconSize: [50, 22],
-    iconAnchor: [25, 11],
+  return cachedIcon(`pin:${label}:${highlighted}`, () => {
+    const bg = highlighted ? "#0f172a" : "#ffffff";
+    const fg = highlighted ? "#ffffff" : "#0f172a";
+    const border = highlighted ? "#0f172a" : "#d4d4d8";
+    return L.divIcon({
+      className: "",
+      html: `<div style="background:${bg};color:${fg};border:1px solid ${border};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.25);white-space:nowrap;font-family:system-ui,sans-serif">${label}</div>`,
+      iconSize: [50, 22],
+      iconAnchor: [25, 11],
+    });
   });
+}
+
+function createClusterIcon(count: number, minPrice: number): L.DivIcon {
+  const from = Number.isFinite(minPrice) ? shortPrice(minPrice) : "";
+  return cachedIcon(`cluster:${count}:${from}`, () => {
+    // Grows with the log of the count so big clusters stand out without
+    // swallowing the map.
+    const size = Math.round(44 + Math.min(20, Math.log2(count) * 3));
+    const fromLine = from ? `<div style="font-size:9px;font-weight:600;opacity:.9">da ${from}</div>` : "";
+    return L.divIcon({
+      className: "",
+      html: `<div style="width:${size}px;height:${size}px;border-radius:999px;background:rgba(29,78,216,.9);color:#fff;border:3px solid rgba(255,255,255,.9);box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;font-family:system-ui,sans-serif"><div style="font-size:12px;font-weight:800">${count}</div>${fromLine}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  });
+}
+
+function ListingPin({
+  marker: m,
+  selected,
+  onClick,
+}: {
+  marker: ListingMarker;
+  selected: boolean;
+  onClick?: (id: string) => void;
+}) {
+  return (
+    <Marker
+      position={[m.lat, m.lng]}
+      icon={createPriceIcon(m.price, selected)}
+      eventHandlers={{ click: () => onClick?.(m.id) }}
+      zIndexOffset={selected ? 1000 : 0}
+    >
+      <Popup>
+        <div style={{ width: 220 }}>
+          {m.thumbnail && (
+            <img
+              src={imageVariant(m.thumbnail, "card")}
+              alt=""
+              referrerPolicy="no-referrer"
+              style={{
+                width: "100%",
+                height: 120,
+                objectFit: "cover",
+                borderRadius: 6,
+                marginBottom: 6,
+              }}
+            />
+          )}
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+            {m.price ? formatPrice(m.price) : "Prezzo su richiesta"}
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 6, lineHeight: 1.3 }}>
+            {m.title}
+          </div>
+          <Link
+            href={`/listing/${m.id}`}
+            style={{ color: "#2563eb", fontSize: 12, fontWeight: 600 }}
+          >
+            Vedi dettagli →
+          </Link>
+        </div>
+      </Popup>
+    </Marker>
+  );
+}
+
+type PinProps = { id: string; price: number | null };
+type ClusterProps = { minPrice: number };
+
+/**
+ * Up to 2000 price pins don't fit a city view: they overlap into an
+ * unreadable carpet and every pan re-renders all of them. Supercluster
+ * groups nearby listings per zoom level (bubble with count and lowest
+ * price; click zooms in until it splits) and only what's on screen is
+ * rendered. The selected listing is kept out of the index so the list ↔
+ * map highlight always shows a real pin.
+ */
+function ClusteredMarkers({
+  markers,
+  selectedId,
+  onMarkerClick,
+}: {
+  markers: ListingMarker[];
+  selectedId?: string | null;
+  onMarkerClick?: (id: string) => void;
+}) {
+  const map = useMap();
+  const [view, setView] = useState(() => ({ bounds: map.getBounds(), zoom: map.getZoom() }));
+  useMapEvents({
+    moveend: () => setView({ bounds: map.getBounds(), zoom: map.getZoom() }),
+  });
+
+  const index = useMemo(() => {
+    const idx = new Supercluster<PinProps, ClusterProps>({
+      radius: 60,
+      maxZoom: 16,
+      map: (p) => ({ minPrice: p.price ?? Infinity }),
+      reduce: (acc, p) => {
+        acc.minPrice = Math.min(acc.minPrice, p.minPrice);
+      },
+    });
+    idx.load(
+      markers
+        .filter((m) => m.id !== selectedId)
+        .map((m) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [m.lng, m.lat] },
+          properties: { id: m.id, price: m.price },
+        })),
+    );
+    return idx;
+  }, [markers, selectedId]);
+
+  const byId = useMemo(() => new Map(markers.map((m) => [m.id, m])), [markers]);
+  const b = view.bounds;
+  const features = index.getClusters([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], Math.round(view.zoom));
+  const selected = selectedId ? byId.get(selectedId) : undefined;
+
+  return (
+    <>
+      {features.map((f) => {
+        const [lng, lat] = f.geometry.coordinates;
+        if ("cluster" in f.properties && f.properties.cluster) {
+          const { cluster_id: clusterId, point_count: count, minPrice } = f.properties;
+          return (
+            <Marker
+              key={`cluster-${clusterId}`}
+              position={[lat, lng]}
+              icon={createClusterIcon(count, minPrice)}
+              eventHandlers={{
+                click: () =>
+                  map.flyTo([lat, lng], Math.min(index.getClusterExpansionZoom(clusterId), 18), { duration: 0.4 }),
+              }}
+            />
+          );
+        }
+        const m = byId.get((f.properties as PinProps).id);
+        return m ? <ListingPin key={m.id} marker={m} selected={false} onClick={onMarkerClick} /> : null;
+      })}
+      {selected && <ListingPin marker={selected} selected onClick={onMarkerClick} />}
+    </>
+  );
 }
 
 interface ViewportSyncProps {
@@ -166,46 +326,7 @@ export default function MapView({
         </>
       )}
 
-      {markers.map((m) => (
-        <Marker
-          key={m.id}
-          position={[m.lat, m.lng]}
-          icon={createPriceIcon(m.price, selectedId === m.id)}
-          eventHandlers={{ click: () => onMarkerClick?.(m.id) }}
-          zIndexOffset={selectedId === m.id ? 1000 : 0}
-        >
-          <Popup>
-            <div style={{ width: 220 }}>
-              {m.thumbnail && (
-                <img
-                  src={m.thumbnail}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  style={{
-                    width: "100%",
-                    height: 120,
-                    objectFit: "cover",
-                    borderRadius: 6,
-                    marginBottom: 6,
-                  }}
-                />
-              )}
-              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-                {m.price ? formatPrice(m.price) : "Prezzo su richiesta"}
-              </div>
-              <div style={{ fontSize: 12, marginBottom: 6, lineHeight: 1.3 }}>
-                {m.title}
-              </div>
-              <Link
-                href={`/listing/${m.id}`}
-                style={{ color: "#2563eb", fontSize: 12, fontWeight: 600 }}
-              >
-                Vedi dettagli →
-              </Link>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
+      <ClusteredMarkers markers={markers} selectedId={selectedId} onMarkerClick={onMarkerClick} />
     </MapContainer>
   );
 }

@@ -5,6 +5,25 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Pick the size of a portal photo for where it's shown. Portal CDNs serve
+ * several sizes of each image and the scrapers store whichever the page
+ * used. Measured 2026-10-13:
+ *  - immobiliare: m-c 1024x768 (112 KB) → xs-c 640x480 (57 KB) for cards
+ *  - casa.it: resizes to any WxH up to 800x600 → 640x480 (37 KB vs 53 KB)
+ *  - tecnocasa: detail 1024x768 → gallery 1200x900 for the full view
+ * Other portals (remax, gabetti, vistocasa) expose a single size.
+ */
+export function imageVariant(url: string, use: "card" | "full"): string {
+  if (use === "card") {
+    if (url.includes("pwm.im-cdn.it/image/")) return url.replace(/\/m-c\.jpg$/, "/xs-c.jpg");
+    if (/\/\/images-\d+\.casa\.it\//.test(url)) return url.replace(/\/\d+x\d+\/listing\//, "/640x480/listing/");
+  } else if (url.includes("medialabtc.it/")) {
+    return url.replace(/\/detail\.jpeg$/, "/gallery.jpeg");
+  }
+  return url;
+}
+
 export function formatPrice(price: number | null): string {
   if (price === null) return "Prezzo su richiesta";
   return new Intl.NumberFormat("it-IT", {

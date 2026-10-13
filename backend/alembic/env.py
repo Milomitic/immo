@@ -6,8 +6,7 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-import app.models.listing  # noqa: F401  (register tables on Base.metadata)
-import app.models.scrape_run  # noqa: F401
+import app.models  # noqa: F401  (registers every table on Base.metadata)
 from app.config import settings
 from app.database import Base, include_schema_name
 
