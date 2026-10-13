@@ -376,11 +376,11 @@ def map_condition(raw: str | None) -> str | None:
     lower = raw.lower()
     if "nuovo" in lower or "costruzione" in lower or "in costruzione" in lower:
         return "nuovo"
-    if "ristrutturato" in lower or "ottimo" in lower:
+    if "ristrutturato" in lower or "ottim" in lower:  # ottimo/ottime condizioni
         return "ristrutturato"
     if "da ristrutturare" in lower or "da_ristrutturare" in lower:
         return "da_ristrutturare"
-    if "buono" in lower or "abitabile" in lower or "discreto" in lower:
+    if "buon" in lower or "abitabile" in lower or "discreto" in lower:  # buono/buone condizioni
         return "buono"
     return lower.strip() or None
 

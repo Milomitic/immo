@@ -10,6 +10,13 @@ from app.utils.text import normalize_address
 
 EARTH_RADIUS_M = 6371000
 
+# When neither an address nor coordinates can be compared, only price, area
+# and rooms are left — and plenty of flats share those. Such a match must be
+# near-identical (price and area within ~1%), or two different homes get
+# merged and one disappears from the results. Agencies republishing on
+# classifieds sites (Subito) keep identical figures, so they still merge.
+LOCATIONLESS_THRESHOLD = 0.95
+
 
 def haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Distance in meters between two lat/lng points."""
@@ -113,6 +120,7 @@ async def find_duplicate(
 
     best_match = None
     best_score = 0.0
+    has_coords = lat is not None and lng is not None
 
     for candidate in candidates:
         score = compute_similarity(
@@ -120,7 +128,11 @@ async def find_duplicate(
             candidate.normalized_address, candidate.price, candidate.area_sqm,
             candidate.rooms, candidate.lat, candidate.lng,
         )
-        if score >= threshold and score > best_score:
+        located = (normalized_addr and candidate.normalized_address) or (
+            has_coords and candidate.lat is not None and candidate.lng is not None
+        )
+        needed = threshold if located else max(threshold, LOCATIONLESS_THRESHOLD)
+        if score >= needed and score > best_score:
             best_score = score
             best_match = candidate
 

@@ -57,8 +57,26 @@ export interface ListingSource {
   is_active: boolean;
 }
 
+/** A judicial auction's sale data. Times are local wall-clock values
+ *  ("2027-01-22T16:30"). */
+export interface AuctionInfo {
+  date: string | null;
+  base_price: number | null;
+  minimum_offer: number | null;
+  minimum_raise: number | null;
+  offer_deadline: string | null;
+  court: string | null;
+  procedure: string | null;
+  procedure_type: string | null;
+  sale_mode: string | null;
+  /** Visit booking on the Ministry's Portale Vendite Pubbliche. */
+  pvp_url: string | null;
+  documents: { name: string; url: string }[];
+}
+
 export interface ListingDetail extends Listing {
   sources: ListingSource[];
+  auction: AuctionInfo | null;
 }
 
 /** A saved search: the /search filter params plus "what's new" counts. */

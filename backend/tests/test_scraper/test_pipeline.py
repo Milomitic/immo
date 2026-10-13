@@ -1,9 +1,13 @@
+import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text, update
 
+import scraper.pipeline as pipeline
 from app.config import settings
 from app.models.listing import Listing, ListingPriceHistory, ListingSource
+from app.models.scrape_run import ScrapeRun
 from scraper.items import ListingItem
 from scraper.pipeline import (
     bump_last_seen,
@@ -343,3 +347,86 @@ async def test_a_duplicate_can_reveal_an_auction(db_session):
     db_session.expire_all()
     row = (await db_session.execute(select(Listing))).scalar_one()
     assert row.is_auction is True
+
+
+AUCTION = {"date": "2027-01-22T16:30", "base_price": 79000.0, "court": "Tribunale di Bari"}
+
+
+async def test_auction_data_is_stored_with_the_listing(db_session):
+    await process_items_batch([item(is_auction=True, auction=AUCTION)], "run")
+    row = (await db_session.execute(select(Listing))).scalar_one()
+    assert json.loads(row.auction_info) == AUCTION
+
+
+async def test_auction_data_from_a_secondary_portal_reaches_the_canonical(db_session):
+    await process_items_batch([item()], "run-1")
+    await process_items_batch(
+        [item(source_portal="wikicasa", source_id="w-1", source_url="https://www.wikicasa.it/annuncio/1",
+              is_auction=True, auction=AUCTION)],
+        "run-2",
+    )
+    db_session.expire_all()
+    row = (await db_session.execute(select(Listing))).scalar_one()
+    assert row.source_portal == "immobiliare"  # still canonical
+    assert row.is_auction is True
+    assert json.loads(row.auction_info)["court"] == "Tribunale di Bari"
+
+
+async def test_wikicasa_ranks_below_the_agencies_own_portals(db_session):
+    await process_items_batch(
+        [item(source_portal="wikicasa", source_id="w-1", source_url="https://www.wikicasa.it/annuncio/1")], "run-1"
+    )
+    await process_items_batch([item(source_portal="tecnocasa", source_id="t-1", source_url="https://t/1")], "run-2")
+    db_session.expire_all()
+    row = (await db_session.execute(select(Listing))).scalar_one()
+    assert row.source_portal == "tecnocasa"  # promoted over the republisher
+
+
+async def test_locationless_listings_merge_only_when_near_identical(db_session):
+    await process_items_batch([item()], "run-1")  # has address and coordinates
+    nowhere = dict(source_portal="subito", address=None, lat=None, lng=None)
+    # 3% cheaper, same size and rooms: plausibly a different flat
+    await process_items_batch(
+        [item(source_id="s-1", source_url="https://www.subito.it/a-1.htm", price=194000.0, **nowhere)], "run-2"
+    )
+    # same figures: the agency's ad republished on Subito
+    await process_items_batch(
+        [item(source_id="s-2", source_url="https://www.subito.it/a-2.htm", **nowhere)], "run-3"
+    )
+    db_session.expire_all()
+    portals = sorted(r.source_portal for r in (await db_session.execute(select(Listing))).scalars())
+    assert portals == ["immobiliare", "subito"]  # s-1 stands on its own
+    assert await count(db_session, ListingSource) == 3  # s-2 joined the original
+
+
+async def test_a_concurrent_commit_mid_batch_does_not_lose_the_batch(session_factory, monkeypatch):
+    """The runner's progress heartbeat commits every 2s on its own
+    connection. A batch that has read before such a commit and writes after
+    it must still go through: it used to fail as a whole with "database is
+    locked" (a stale WAL snapshot, which busy_timeout can't wait out)."""
+    async with session_factory() as s:
+        await s.execute(text("PRAGMA journal_mode=WAL"))  # as in production
+        s.add(ScrapeRun(id="hb", portal="x", status="running"))
+        await s.commit()
+
+    async def heartbeat():
+        async with session_factory() as s:
+            await s.execute(update(ScrapeRun).where(ScrapeRun.id == "hb").values(progress_done=1))
+            await s.commit()
+
+    original = pipeline.find_duplicate
+    tasks = []
+
+    async def find_duplicate_then_yield(*args, **kwargs):
+        found = await original(*args, **kwargs)  # the batch has read...
+        tasks.append(asyncio.create_task(heartbeat()))
+        await asyncio.sleep(0.3)  # ...and the other connection gets its turn
+        return found
+
+    monkeypatch.setattr(pipeline, "find_duplicate", find_duplicate_then_yield)
+    counts = await process_items_batch([item()], "run")
+    await asyncio.gather(*tasks)  # the heartbeat got through too, after the batch
+
+    assert counts["errors"] == 0 and counts["new"] == 1
+    async with session_factory() as s:
+        assert (await s.get(ScrapeRun, "hb")).progress_done == 1

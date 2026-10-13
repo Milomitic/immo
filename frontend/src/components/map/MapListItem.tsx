@@ -13,6 +13,7 @@ import {
   imageVariant, portalColor, portalLabel, roomsLabel,
 } from "@/lib/utils";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
+import { AuctionSummary } from "@/components/listings/AuctionDetails";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PublishedAt } from "@/components/listings/PublishedAt";
@@ -286,6 +287,7 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
                     {[listing.address, listing.zone].filter(Boolean).join(", ")}
                   </p>
                 )}
+                {listing.auction && <AuctionSummary auction={listing.auction} className="mt-1" />}
               </div>
 
               {facts.length > 0 && (

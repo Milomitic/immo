@@ -12,12 +12,16 @@ export function cn(...inputs: ClassValue[]) {
  *  - immobiliare: m-c 1024x768 (112 KB) → xs-c 640x480 (57 KB) for cards
  *  - casa.it: resizes to any WxH up to 800x600 → 640x480 (37 KB vs 53 KB)
  *  - tecnocasa: detail 1024x768 → gallery 1200x900 for the full view
+ *  - wikicasa: stored at 1280x960 (webp) → 640x480 for cards
+ *  - subito: a size "rule" in the query → the card rule for cards
  * Other portals (remax, gabetti, vistocasa) expose a single size.
  */
 export function imageVariant(url: string, use: "card" | "full"): string {
   if (use === "card") {
     if (url.includes("pwm.im-cdn.it/image/")) return url.replace(/\/m-c\.jpg$/, "/xs-c.jpg");
     if (/\/\/images-\d+\.casa\.it\//.test(url)) return url.replace(/\/\d+x\d+\/listing\//, "/640x480/listing/");
+    if (url.includes("images.wk-cdn.it/")) return url.replace(/\/webp\/\d+x\d+\.webp$/, "/webp/640x480.webp");
+    if (url.includes("images.sbito.it/")) return url.replace(/rule=[\w-]+/, "rule=large-fixed-card-1x-auto");
   } else if (url.includes("medialabtc.it/")) {
     return url.replace(/\/detail\.jpeg$/, "/gallery.jpeg");
   }
@@ -57,6 +61,8 @@ export function portalLabel(portal: string): string {
     remax: "RE/MAX",
     gabetti: "Gabetti",
     vistocasa: "Vistocasa",
+    wikicasa: "Wikicasa",
+    subito: "Subito",
   };
   return labels[portal] || portal;
 }
@@ -70,6 +76,8 @@ export function portalColor(portal: string): string {
     remax: "bg-red-500",
     gabetti: "bg-amber-600",
     vistocasa: "bg-teal-600",
+    wikicasa: "bg-indigo-600",
+    subito: "bg-rose-600",
   };
   return colors[portal] || "bg-gray-500";
 }

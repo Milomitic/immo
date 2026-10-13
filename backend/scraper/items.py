@@ -44,5 +44,8 @@ class ListingItem:
     # Set by spiders that have a structured flag (immobiliare's contract);
     # the pipeline also recognises auctions from title/description.
     is_auction: bool = False
+    # For auctions, the sale's data when the portal gives it (date, base
+    # price, minimum offer, court, procedure, links): see the wikicasa spider.
+    auction: dict | None = None
 
     raw_data: dict = field(default_factory=dict)

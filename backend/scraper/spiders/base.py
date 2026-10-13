@@ -282,17 +282,31 @@ class BaseSpider(ABC):
         parallel instead of serially.
         """
         logger.info("spider_start", portal=self.portal_name, city=params.city)
+        url_prices = await self.search_phase(params)
+        if url_prices is None:
+            return
+        async for item in self.detail_phase(url_prices, params):
+            yield item
+
+    async def search_phase(self, params: SearchParams) -> dict[str, float | None] | None:
+        """Phase 1: walk the result pages built by ``build_search_url``.
+
+        Returns each listing URL with the price shown on its card (None when
+        the card has none), or None when the first page couldn't be loaded
+        (already recorded). Spiders whose catalogue spans several result
+        lists call it once per list and merge the results.
+        """
         self.progress.set_phase("search")
         self.progress.set_description(f"{self.portal_name} cerca pag 1")
 
-        # Phase 1: collect all listing URLs sequentially (few pages, cheap).
+        # Collect all listing URLs sequentially (few pages, cheap).
         first_url = await self.build_search_url(params, page=1)
         first_html = await self.fetch(first_url, not_found_ok=False)
         if not first_html:
             logger.error("search_failed", portal=self.portal_name, url=first_url)
             self.search_pages_failed += 1
             self.progress.set_phase("failed")
-            return
+            return None
 
         site_pages = await self.get_total_pages(first_html)
         total_pages = min(site_pages, params.max_pages)
@@ -334,9 +348,7 @@ class BaseSpider(ABC):
             self.progress.set_description(
                 f"{self.portal_name} cerca pag {page}/{total_pages} ({len(url_prices)} url)"
             )
-
-        async for item in self.detail_phase(url_prices, params):
-            yield item
+        return url_prices
 
     async def detail_phase(
         self,

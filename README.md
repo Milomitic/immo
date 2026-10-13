@@ -1,7 +1,7 @@
 # Immo — Aggregatore Annunci Immobiliari
 
 Web app full-stack che aggrega, deduplica e confronta annunci immobiliari da
-**6 portali** italiani: ricerca full-text con filtri, mappa in stile portale
+**8 portali** italiani: ricerca full-text con filtri, mappa in stile portale
 con anteprima rapida e disegno del perimetro, storico prezzi, aste,
 preferiti, ricerche salvate con avvisi e scansione one-click dalla homepage.
 
@@ -9,8 +9,9 @@ preferiti, ricerche salvate con avvisi e scansione one-click dalla homepage.
 
 ### Aggregazione multi-portale
 Scraping da **Immobiliare.it**, **Casa.it**, **Tecnocasa**, **RE/MAX**,
-**Gabetti** e **Vistocasa**. Idealista è presente ma disabilitato di default
-(DataDome blocca tutto). Ogni annuncio nuovo viene deduplicato cross-portale
+**Gabetti**, **Vistocasa**, **Wikicasa** (agenzie e aste giudiziarie) e
+**Subito** (dove pubblicano i privati). Idealista è presente ma disabilitato
+di default (DataDome blocca tutto). Ogni annuncio nuovo viene deduplicato cross-portale
 (indirizzo, prezzo, superficie, coordinate, stanze) e il portale con priorità
 più alta diventa canonical; gli altri restano attaccati come `listing_sources`.
 Gli annunci spariti da un portale vengono disattivati solo se l'ultima
@@ -45,10 +46,15 @@ alla scheda completa. I filtri si aprono in una sotto-barra chiudibile.
 point-in-polygon; il perimetro è in URL, condivisibile, attivo anche in lista.
 
 ### Aste
-Gli annunci all'asta sono riconosciuti (dato strutturato su Immobiliare.it,
-analisi del testo sugli altri portali: "asta giudiziaria", "base d'asta",
-"vendita senza incanto"…), segnalati con un'etichetta e filtrabili
-(tutte / solo aste / escludi aste).
+Gli annunci all'asta sono riconosciuti (dato strutturato su Immobiliare.it e
+Wikicasa, analisi del testo sugli altri portali: "asta giudiziaria", "base
+d'asta", "vendita senza incanto"…), segnalati con un'etichetta e filtrabili
+(tutte / solo aste / escludi aste). Per le aste pubblicate su Wikicasa il
+dettaglio mostra anche i dati della vendita: data e ora, prezzo base,
+offerta minima e rilancio, termine per le offerte, tribunale e procedura,
+il link per prenotare la visita sul Portale Vendite Pubbliche e i documenti
+(avviso, delega). Arrivano anche quando l'annuncio principale viene da un
+altro portale.
 
 ### Preferiti e ricerche salvate
 Il cuore su card e dettaglio salva l'annuncio in `/favorites`. Una ricerca si
@@ -263,7 +269,7 @@ pagina di ricerca** (tolleranza €1), aggiorna `price`, `price_previous`,
 `price_changed_at` e aggiunge un punto a `listing_price_history`. Il badge
 mostra il delta % (↓ verde / ↑ rosso, tooltip "Variato N giorni fa · prima
 €X"); il dettaglio mostra il grafico. Portali con prezzo dalle pagine di
-ricerca: Immobiliare.it, Casa.it, RE/MAX, Vistocasa.
+ricerca: Immobiliare.it, Casa.it, RE/MAX, Vistocasa, Wikicasa, Subito.
 
 ### Ricerche salvate
 
@@ -344,8 +350,8 @@ backend/
     observability.py  Sentry + middleware delle metriche
   alembic/         Migrazioni (applicate all'avvio)
   scraper/
-    spiders/       6 spider + BaseSpider + PlaywrightSpider (idealista)
-    utils/         Rate limiter, JSON-LD, RSC flight (Next.js), HTML extract
+    spiders/       8 spider + BaseSpider + PlaywrightSpider (idealista)
+    utils/         Rate limiter, JSON-LD, RSC flight (Next.js), payload Nuxt, HTML extract
     pipeline.py    Dedup + upsert batch, price-diff, aste, disattivazione
     runner.py      Orchestratore CLI + ticker async per il progress DB
   tests/           pytest (API, parser, pipeline, migrazioni) — mai sul DB reale
@@ -397,6 +403,26 @@ etichetta/valore e testo; ogni gruppo di campi ha il suo estrattore in
 `casa.py`. Le immagini sono su `https://images-1.casa.it/{size}/listing/{mediaid}`:
 senza il segmento `/listing/` il CDN torna 400.
 
+### Scraping — Wikicasa (Nuxt)
+Le pagine portano i dati nello script `__NUXT_DATA__`, serializzato con
+*devalue*: un array piatto in cui oggetti e liste contengono indici dello
+stesso array. `scraper/utils/nuxt.py` lo ricostruisce; lo spider legge gli
+store Pinia (`realEstateListingStoreId` per la ricerca, 25 card per pagina;
+`realEstateDetailsStoreId` per il dettaglio). Le aste sono un elenco a parte
+(`/asta-case/…`), percorso dopo le vendite. Il prezzo di un'asta è il prezzo
+base, anche sulla card (dove `price` è l'offerta minima), altrimenti ogni
+scansione segnalerebbe un falso ribasso. Con la posizione nascosta il sito
+dà il centro città: in quel caso niente coordinate.
+
+### Scraping — Subito, con prudenza
+Subito è dietro DataDome, quindi lo spider non apre mai un annuncio: le
+pagine di ricerca (Next.js, `__NEXT_DATA__`) contengono già tutto — testo,
+foto, superficie, locali, piano, stato, classe energetica, dotazioni,
+privato/agenzia. Una scansione di Bari sono ~35 richieste, una ogni 5
+secondi. Subito non dà indirizzo né coordinate: gli annunci compaiono nelle
+liste ma non sulla mappa. Gli URL di ricerca richiedono regione e provincia:
+i comuni supportati sono in `_AREAS` (Bari e provincia, capoluoghi pugliesi).
+
 ### Scraping — RE/MAX (Next.js RSC)
 Il sito non ha più HTML con i dati: stanno nel "flight" React Server
 Components nelle `<script>`. `scraper/utils/rsc.py` ricompone il payload e
@@ -406,6 +432,13 @@ risolve i riferimenti `$NN` ai blocchi di testo.
 Vistocasa è WebForms puro con `__doPostBack`: lo spider fa GET → POST con
 `__EVENTTARGET` + `__VIEWSTATE` rigenerato per pagina; tre POST falliti di
 fila → stop (sessione morta).
+
+### Scraping — scritture in lotti e `BEGIN IMMEDIATE`
+La pipeline salva 25 annunci per volta, con un SAVEPOINT per annuncio. Il
+lotto apre la transazione con `BEGIN IMMEDIATE`: senza, il primo SAVEPOINT
+apriva una transazione *differita* e, se il battito di avanzamento del
+runner faceva commit tra una lettura e una scrittura, SQLite rifiutava la
+scrittura ("database is locked") e il lotto andava perso.
 
 ### Backend — scrape trigger come subprocess detached
 `POST /scrape/trigger` **non** usa `BackgroundTasks` (morirebbero al prossimo
@@ -443,8 +476,9 @@ Variabili principali (elenco completo in `.env.example` e
 | `DATABASE_URL` | `data/immo.db` alla root | Lasciala non impostata in locale |
 | `SCRAPE_DEFAULT_CITY` | `bari` | Città del run CLI e del bottone scan |
 | `SCRAPE_SCHEDULE_ENABLED` / `SCRAPE_INTERVAL_HOURS` | `false` / `6` | Scansioni periodiche automatiche (opt-in) |
+| `SCRAPE_<PORTALE>_ENABLED` | `true` | Uno per portale (immobiliare, casa, tecnocasa, remax, gabetti, vistocasa, wikicasa, subito) |
 | `SCRAPE_IDEALISTA_ENABLED` | `false` | DataDome blocca — servirebbe un proxy residenziale |
-| `SCRAPE_RATE_LIMIT_RPM` / `SCRAPE_RATE_LIMITS` | 60 / per portale | Richieste al minuto (casa.it: 30) |
+| `SCRAPE_RATE_LIMIT_RPM` / `SCRAPE_RATE_LIMITS` | 60 / per portale | Richieste al minuto (casa.it 30, Wikicasa 30, Subito 12) |
 | `SCRAPE_MAX_PAGES` | 200 | Tetto di pagine di ricerca per portale |
 | `SCRAPE_CONCURRENCY` | 4 | Detail fetch concorrenti per spider |
 | `DEDUP_THRESHOLD` | 0.85 | Score cross-portale per considerare due annunci uguali |
@@ -466,8 +500,14 @@ Score pesato in `app.services.dedup_service.find_duplicate`:
 - **Geolocalizzazione** (distanza haversine): 15%
 - **Numero stanze**: 10%
 
-Soglia ≥ 0.85 per il merge. Il portale che viene prima in `PORTAL_PRIORITY =
-["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa",
+Soglia ≥ 0.85 per il merge. Se la posizione non è confrontabile (manca
+l'indirizzo o mancano le coordinate da una delle due parti, come per Subito)
+restano solo prezzo, superficie e locali: la soglia sale a 0.95, cioè
+prezzo e superficie quasi identici. Un annuncio d'agenzia ripubblicato si
+fonde comunque; due case diverse con misure simili no.
+
+Il portale che viene prima in `PORTAL_PRIORITY = ["immobiliare", "casa",
+"tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "subito",
 "idealista"]` resta canonical; gli altri diventano `ListingSource`. Se arriva
 un match da un portale con priorità più alta, `_promote_listing` sovrascrive i
 campi canonical mantenendo stabile `listing.id`.

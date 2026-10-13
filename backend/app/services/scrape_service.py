@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.scrape_run import ScrapeRun
 
-ALL_PORTALS = ("immobiliare", "casa", "tecnocasa", "remax", "gabetti", "vistocasa", "idealista")
+ALL_PORTALS = (
+    "immobiliare", "casa", "tecnocasa", "remax", "gabetti", "vistocasa", "wikicasa", "subito",
+    "idealista",
+)
 
 # A "running" row whose heartbeat is older than this belongs to a dead
 # worker (killed process, crash) and must not block new scrapes.

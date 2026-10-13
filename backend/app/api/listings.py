@@ -1,9 +1,13 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.models.listing import Listing
 from app.schemas.listing import (
+    AuctionInfo,
     ListingDetailResponse,
     ListingMarkersResponse,
     ListingResponse,
@@ -160,7 +164,18 @@ async def get_listing(listing_id: str, db: AsyncSession = Depends(get_db)) -> Li
 
     sources = [ListingSourceResponse.model_validate(s) for s in listing.sources]
     base = listing_to_response(listing)
-    return ListingDetailResponse(**base.model_dump(), sources=sources)
+    return ListingDetailResponse(
+        **base.model_dump(), sources=sources, auction=_auction_info(listing.auction_info)
+    )
+
+
+def _auction_info(raw: str | None) -> AuctionInfo | None:
+    if not raw:
+        return None
+    try:
+        return AuctionInfo.model_validate(json.loads(raw))
+    except (ValueError, ValidationError):  # a bad row mustn't break the page
+        return None
 
 
 @router.get("/{listing_id}/similar", response_model=list[ListingResponse])

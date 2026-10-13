@@ -51,6 +51,14 @@ try:
     from scraper.spiders.vistocasa import VistocasaSpider
 except ImportError:
     VistocasaSpider = None
+try:
+    from scraper.spiders.wikicasa import WikicasaSpider
+except ImportError:
+    WikicasaSpider = None
+try:
+    from scraper.spiders.subito import SubitoSpider
+except ImportError:
+    SubitoSpider = None
 
 
 class _ProgressBar:
@@ -167,6 +175,10 @@ if GabettiSpider:
     SPIDERS["gabetti"] = GabettiSpider
 if VistocasaSpider:
     SPIDERS["vistocasa"] = VistocasaSpider
+if WikicasaSpider:
+    SPIDERS["wikicasa"] = WikicasaSpider
+if SubitoSpider:
+    SPIDERS["subito"] = SubitoSpider
 
 BATCH_SIZE = 25
 

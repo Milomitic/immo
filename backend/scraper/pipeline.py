@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -17,7 +17,11 @@ logger = structlog.get_logger()
 
 # Portal priority for deduplication: lower index = higher priority.
 # When duplicates exist, the highest-priority portal becomes the canonical listing.
-PORTAL_PRIORITY = ["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa", "idealista"]
+# Wikicasa republishes agencies' listings: the agencies' own portals win.
+# Subito comes last of the active ones: no address or coordinates.
+PORTAL_PRIORITY = [
+    "immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "subito", "idealista",
+]
 
 
 async def get_known_source_ids(portal: str) -> set[str]:
@@ -128,6 +132,11 @@ def _mark_auction(listing: Listing, item: ListingItem) -> None:
     # without a structured flag can't prove the opposite).
     if _is_auction(item):
         listing.is_auction = True
+    # The sale's data, from whichever portal publishes it — even when the
+    # canonical listing comes from another one. Newest wins: auctions get
+    # rescheduled and re-priced.
+    if item.auction:
+        listing.auction_info = json.dumps(item.auction, default=str)
 
 
 # Keep IN (...) lists under SQLite's bound-parameter limit.
@@ -293,6 +302,15 @@ async def process_items_batch(
         return counts
 
     async with async_session() as db:
+        if db.bind.dialect.name == "sqlite":
+            # Take the write lock up front. Otherwise the first SAVEPOINT
+            # opens a *deferred* transaction (and its RELEASE commits it):
+            # each item reads, then writes — and if the runner's progress
+            # heartbeat commits in between, SQLite refuses the write at
+            # once ("database is locked", a stale WAL snapshot that
+            # busy_timeout can't wait out), losing the whole batch. With
+            # IMMEDIATE, competing writers simply wait for our commit.
+            await db.execute(text("BEGIN IMMEDIATE"))
         for item in items:
             try:
                 async with db.begin_nested():
@@ -488,6 +506,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         year_built=item.year_built,
         publication_date=item.publication_date,
         is_auction=_is_auction(item),
+        auction_info=json.dumps(item.auction, default=str) if item.auction else None,
         created_at=now,
         updated_at=now,
         first_seen_at=now,

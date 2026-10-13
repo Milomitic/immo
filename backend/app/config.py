@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     SCRAPE_REMAX_ENABLED: bool = True
     SCRAPE_GABETTI_ENABLED: bool = True
     SCRAPE_VISTOCASA_ENABLED: bool = True
+    SCRAPE_WIKICASA_ENABLED: bool = True
+    SCRAPE_SUBITO_ENABLED: bool = True
     SCRAPE_RATE_LIMIT_RPM: int = 60  # default for portals not listed below
     # Per-portal overrides. casa.it's WAF bans the IP after aggressive runs,
     # so it gets half the default budget.
@@ -37,6 +39,11 @@ class Settings(BaseSettings):
         "remax": 60,
         "gabetti": 60,
         "vistocasa": 90,
+        # Behind Cloudflare, which turns some requests away (403) at 40/min.
+        "wikicasa": 30,
+        # DataDome-protected: one page every 5s, and only search pages
+        # (the spider never opens a listing).
+        "subito": 12,
     }
     # Upper bound on search pages per path. Spiders follow the site's own
     # page count up to this; immobiliare offers ~100 pages for Bari, so the

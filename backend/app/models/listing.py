@@ -74,6 +74,9 @@ class Listing(Base):
     year_built: Mapped[int | None] = mapped_column(Integer)
     # Judicial / online auction rather than a normal sale (migration 0008).
     is_auction: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # The sale's data for auctions (date, base price, minimum offer, court,
+    # links), as JSON; see app.schemas.listing.AuctionInfo.
+    auction_info: Mapped[str | None] = mapped_column(Text)
 
     # Timestamps
     publication_date: Mapped[str | None] = mapped_column(Text)  # Original date from source portal

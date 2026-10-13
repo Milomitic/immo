@@ -105,6 +105,24 @@ async def test_detail_includes_sources(client, seeded):
     assert body["sources"][0]["source_portal"] == "casa"
 
 
+async def test_detail_includes_auction_data(client, db_session):
+    auction = make_listing(
+        source_id="asta", is_auction=True,
+        auction_info='{"date": "2027-01-22T16:30", "base_price": 79000, "court": "Tribunale di Bari", '
+                     '"documents": [{"name": "avviso.pdf", "url": "https://x/a.pdf"}]}',
+    )
+    broken = make_listing(source_id="rotto", listing_url="https://example.com/2", auction_info="{not json")
+    db_session.add_all([auction, broken])
+    await db_session.commit()
+
+    body = (await client.get(f"/api/v1/listings/{auction.id}")).json()
+    assert body["auction"]["date"] == "2027-01-22T16:30"
+    assert body["auction"]["base_price"] == 79000
+    assert body["auction"]["documents"] == [{"name": "avviso.pdf", "url": "https://x/a.pdf"}]
+    # a malformed row degrades to "no auction data", not a 500
+    assert (await client.get(f"/api/v1/listings/{broken.id}")).json()["auction"] is None
+
+
 async def test_detail_404(client, seeded):
     r = await client.get("/api/listings/does-not-exist")
     assert r.status_code == 404

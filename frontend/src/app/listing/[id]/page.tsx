@@ -15,6 +15,7 @@ import { PublishedAt } from "@/components/listings/PublishedAt";
 import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
+import { AuctionDetails } from "@/components/listings/AuctionDetails";
 import { FACT_ICONS, presentAmenities } from "@/components/listings/featureIcons";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
@@ -250,6 +251,8 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 {listing.is_auction && <AuctionBadge size="md" />}
               </div>
             </div>
+
+            {listing.auction && <AuctionDetails auction={listing.auction} />}
 
             <PriceHistory listingId={listing.id} listingType={listing.listing_type} />
 

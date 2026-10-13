@@ -396,6 +396,8 @@ export function FilterFields({ showHeader = true, layout = "stack" }: FilterFiel
             { value: "remax", label: "RE/MAX" },
             { value: "gabetti", label: "Gabetti" },
             { value: "vistocasa", label: "Vistocasa" },
+            { value: "wikicasa", label: "Wikicasa" },
+            { value: "subito", label: "Subito" },
           ].map(({ value, label }) => (
             <PillButton key={value} label={label} active={sourcePortal === value} onClick={() => setSourcePortal(sourcePortal === value ? null : value)} />
           ))}

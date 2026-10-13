@@ -66,8 +66,31 @@ class ListingSourceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AuctionDocument(BaseModel):
+    name: str
+    url: str
+
+
+class AuctionInfo(BaseModel):
+    """A judicial auction's sale data, as the portal publishes it. Dates
+    are local wall-clock times ("2027-01-22T16:30")."""
+
+    date: str | None = None
+    base_price: float | None = None
+    minimum_offer: float | None = None
+    minimum_raise: float | None = None
+    offer_deadline: str | None = None
+    court: str | None = None
+    procedure: str | None = None
+    procedure_type: str | None = None
+    sale_mode: str | None = None
+    pvp_url: str | None = None
+    documents: list[AuctionDocument] = []
+
+
 class ListingDetailResponse(ListingResponse):
     sources: list[ListingSourceResponse] = []
+    auction: AuctionInfo | None = None
 
 
 class PricePointResponse(BaseModel):
