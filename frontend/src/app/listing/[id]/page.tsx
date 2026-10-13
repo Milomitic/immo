@@ -14,6 +14,7 @@ import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
+import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 
@@ -245,6 +246,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 <Badge>{propertyTypeLabel(listing.property_type)}</Badge>
                 {listing.energy_class && <Badge className={energyClassColor(listing.energy_class)}>Classe {listing.energy_class}</Badge>}
                 {listing.condition && <Badge variant="outline">{conditionLabel(listing.condition)}</Badge>}
+                {listing.is_auction && <AuctionBadge size="md" />}
               </div>
             </div>
 

@@ -1,5 +1,6 @@
 import type {
   Favorite,
+  LastUpdate,
   ListingDetail,
   ListingMarkersResponse,
   ListingSearchParams,
@@ -127,6 +128,10 @@ export async function triggerScrape(portal: string = "all", city?: string): Prom
     method: "POST",
     body: JSON.stringify({ portal, ...(city ? { city } : {}) }),
   });
+}
+
+export async function fetchLastUpdate(): Promise<LastUpdate> {
+  return fetchApi<LastUpdate>(`/scrape/last-update`);
 }
 
 export async function fetchScrapeStatus(): Promise<ScrapeStatus> {

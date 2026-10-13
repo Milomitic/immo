@@ -1,16 +1,17 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useQueryState, parseAsString } from "nuqs";
 import { useMapMarkers } from "@/hooks/useListings";
-import { formatArea, formatPrice, imageVariant, roomsLabel } from "@/lib/utils";
-import { Building2, List as ListIcon, MapPin, Pencil, X, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { List as ListIcon, Map as MapIcon, Pencil, X, Check } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import type { ListingSearchParams } from "@/lib/types";
 import { filtersToParams, useListingFilters } from "@/components/search/FilterFields";
-import { MapFilters } from "@/components/map/MapFilters";
+import { MapFiltersButton, MapFiltersPanel } from "@/components/map/MapFilters";
+import { MapListItem } from "@/components/map/MapListItem";
 import { ActiveFilters } from "@/components/search/ActiveFilters";
 
 /**
@@ -63,7 +64,13 @@ function MapPageContent() {
   const [q] = useQueryState("q", parseAsString);
   const [bbox, setBbox] = useQueryState("bbox", parseAsString);
   const [polygonStr, setPolygonStr] = useQueryState("polygon", parseAsString);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Row under the pointer (highlights its pin) and the row opened in place.
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Phones get one panel at a time; md+ shows list and map side by side.
+  const [mobileView, setMobileView] = useState<"map" | "list">("map");
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
   // Build a /search href that carries every current filter param. ``bbox``
   // is intentionally excluded — the search list shouldn't be clipped to
   // whatever viewport the user happens to have on the map.
@@ -142,17 +149,24 @@ function MapPageContent() {
     [setBbox],
   );
 
+  // A pin click opens its row; scrolling waits for the row to render open.
+  const scrollToRow = useRef<string | null>(null);
   const handleMarkerClick = useCallback((id: string) => {
-    setSelectedId(id);
-    const el = document.getElementById(`map-list-${id}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    scrollToRow.current = id;
+    setExpandedId(id);
   }, []);
+  useEffect(() => {
+    if (!expandedId || scrollToRow.current !== expandedId) return;
+    scrollToRow.current = null;
+    document.getElementById(`map-list-${expandedId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [expandedId]);
+  const toggleRow = useCallback((id: string) => setExpandedId((cur) => (cur === id ? null : id)), []);
 
   const { listingType } = values;
   const { setListingType } = setters;
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col">
+    <div className="h-[calc(100dvh-3.5rem)] flex flex-col">
       {/* Filter bar */}
       <div className="border-b border-[var(--border)] bg-[var(--background)] px-4 py-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -190,8 +204,8 @@ function MapPageContent() {
             </button>
           </div>
 
-          {/* All other filters live in this dropdown */}
-          <MapFilters />
+          {/* The other filters open as a sub-bar below this one. */}
+          <MapFiltersButton open={filtersOpen} onToggle={() => setFiltersOpen((o) => !o)} />
 
           {/* Draw / Cancel-perimeter controls */}
           {!drawingMode && !polygon && (
@@ -246,6 +260,25 @@ function MapPageContent() {
                 }`}
           </span>
 
+          <div className="md:hidden flex rounded-[var(--radius-sm)] overflow-hidden border border-[var(--border)]">
+            {(["map", "list"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setMobileView(v)}
+                aria-pressed={mobileView === v}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium",
+                  v === "list" && "border-l border-[var(--border)]",
+                  mobileView === v ? "bg-[var(--primary)] text-[var(--primary-foreground)]" : "hover:bg-[var(--muted)]",
+                )}
+              >
+                {v === "map" ? <MapIcon className="h-3.5 w-3.5" /> : <ListIcon className="h-3.5 w-3.5" />}
+                {v === "map" ? "Mappa" : "Elenco"}
+              </button>
+            ))}
+          </div>
+
           {/* Mirror of ResultsHeader's "Mappa" CTA — keeps /map ↔ /search
               navigation symmetric, propagates filters (incl. polygon). */}
           <Link
@@ -265,10 +298,17 @@ function MapPageContent() {
         </div>
       </div>
 
+      {filtersOpen && <MapFiltersPanel onClose={closeFilters} />}
+
       {/* Split layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left: scrollable list */}
-        <div className="w-96 shrink-0 border-r border-[var(--border)] overflow-y-auto">
+        <div
+          className={cn(
+            "shrink-0 border-r border-[var(--border)] overflow-y-auto md:block md:w-[28rem] xl:w-[30rem]",
+            mobileView === "list" ? "block w-full" : "hidden",
+          )}
+        >
           {markers.length === 0 && !isLoading && (
             <div className="p-6 text-center text-sm text-[var(--muted-foreground)]">
               Nessun annuncio in questa area.
@@ -277,62 +317,26 @@ function MapPageContent() {
             </div>
           )}
           {markers.map((m) => (
-            <Link
+            <MapListItem
               key={m.id}
-              id={`map-list-${m.id}`}
-              href={`/listing/${m.id}`}
-              onMouseEnter={() => setSelectedId(m.id)}
-              onMouseLeave={() => setSelectedId(null)}
-              className={`flex gap-3 p-3 border-b border-[var(--border)] hover:bg-[var(--muted)] transition-colors ${
-                selectedId === m.id ? "bg-[var(--muted)]" : ""
-              }`}
-            >
-              <div className="w-24 h-20 shrink-0 rounded-[var(--radius-sm)] overflow-hidden bg-[var(--muted)]">
-                {m.thumbnail ? (
-                  <img
-                    src={imageVariant(m.thumbnail, "card")}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-[var(--muted-foreground)]">
-                    <Building2 className="h-6 w-6 opacity-40" />
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-[var(--primary)]">
-                  {m.price ? formatPrice(m.price) : "Prezzo su richiesta"}
-                </div>
-                <div className="text-xs font-medium truncate mt-0.5">
-                  {m.rooms ? roomsLabel(m.rooms) + " · " : ""}
-                  {m.title}
-                </div>
-                <div className="text-xs text-[var(--muted-foreground)] truncate flex items-center gap-1 mt-0.5">
-                  <MapPin className="h-3 w-3 shrink-0" />
-                  {m.zone ? `${m.zone}, ` : ""}
-                  <span className="capitalize">{m.city}</span>
-                </div>
-                {m.area_sqm && (
-                  <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                    {formatArea(m.area_sqm)}
-                  </div>
-                )}
-              </div>
-            </Link>
+              marker={m}
+              mode={expandedId === m.id ? "expanded" : expandedId ? "compact" : "normal"}
+              highlighted={hoverId === m.id}
+              onToggle={() => toggleRow(m.id)}
+              onHover={setHoverId}
+            />
           ))}
         </div>
 
         {/* Right: map */}
-        <div className="flex-1 relative min-w-0">
+        <div className={cn("flex-1 relative min-w-0 md:block", mobileView === "map" ? "block" : "hidden")}>
           <MapView
             markers={markers}
             center={DEFAULT_CENTER}
             zoom={DEFAULT_ZOOM}
             onViewportChange={handleViewportChange}
-            selectedId={selectedId}
+            selectedId={hoverId ?? expandedId}
+            layoutKey={`${filtersOpen}-${mobileView}`}
             onMarkerClick={handleMarkerClick}
             drawingMode={drawingMode}
             drawingPoints={drawingPoints}

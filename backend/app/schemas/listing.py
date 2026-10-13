@@ -37,6 +37,7 @@ class ListingBase(BaseModel):
     has_garden: bool | None = None
     condominium_fees: float | None = None
     year_built: int | None = None
+    is_auction: bool = False
 
 
 class ListingResponse(ListingBase):
@@ -120,6 +121,13 @@ class ListingSearchParams(BaseModel):
     # use them with their own watermark.
     first_seen_after: str | None = None
     price_drop_since: str | None = None
+    # Publication date on the portal (YYYY-MM-DD). ``published_within_days``
+    # counts calendar days including today (1 = today), so a saved search
+    # keeps meaning "recent" instead of freezing a date.
+    published_within_days: int | None = Field(default=None, ge=1, le=3650)
+    published_after: str | None = None
+    # True: auctions only; False: hide auctions.
+    is_auction: bool | None = None
     sort: str = "newest"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
@@ -148,6 +156,8 @@ class ListingMarker(BaseModel):
     area_sqm: float | None = None
     rooms: int | None = None
     thumbnail: str | None = None
+    publication_date: str | None = None
+    is_auction: bool = False
 
     model_config = {"from_attributes": True}
 

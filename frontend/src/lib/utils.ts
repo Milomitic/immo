@@ -169,11 +169,38 @@ export function listingPostedAt(listing: {
 }
 
 /**
+ * "oggi", "ieri", "3 giorni fa", "2 settimane fa"… for a portal publication
+ * date. Those are calendar dates (YYYY-MM-DD) without a time, so counting
+ * hours would invent precision: compare local calendar days instead.
+ */
+export function publishedSince(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const published = new Date(`${dateStr.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(published.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((today.getTime() - published.getTime()) / 86_400_000);
+  if (days <= 0) return "oggi";
+  if (days === 1) return "ieri";
+  if (days < 7) return `${days} giorni fa`;
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return weeks === 1 ? "1 settimana fa" : `${weeks} settimane fa`;
+  }
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return months === 1 ? "1 mese fa" : `${months} mesi fa`;
+  }
+  const years = Math.floor(days / 365);
+  return years === 1 ? "1 anno fa" : `${years} anni fa`;
+}
+
+/**
  * Format a publication_date as "Pubblicato X fa". Returns null when missing.
  */
 export function publishedAgo(dateStr: string | null | undefined): string | null {
-  if (!dateStr) return null;
-  return `Pubblicato ${timeAgo(dateStr)}`;
+  const since = publishedSince(dateStr);
+  return since ? `Pubblicato ${since}` : null;
 }
 
 /**

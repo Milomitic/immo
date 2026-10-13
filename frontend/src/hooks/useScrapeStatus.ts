@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchScrapeStatus, triggerScrape } from "@/lib/api";
+import { fetchLastUpdate, fetchScrapeStatus, triggerScrape } from "@/lib/api";
 import type { ScrapeStatus } from "@/lib/types";
 
 const STATUS_KEY = ["scrape-status"] as const;
+const LAST_UPDATE_KEY = ["scrape-last-update"] as const;
 
 /**
  * Poll the aggregated scrape status. Refetches every 2 seconds while
@@ -24,6 +26,20 @@ export function useScrapeStatus() {
     // flight — avoids the progress bar flickering to "0/0" between polls.
     placeholderData: (prev) => prev,
   });
+}
+
+/**
+ * When the catalogue was last refreshed. Re-read whenever a scan stops
+ * running, so the date next to "Aggiorna annunci" moves on its own.
+ */
+export function useLastUpdate() {
+  const qc = useQueryClient();
+  const { data: status } = useScrapeStatus();
+  const running = status?.is_running ?? false;
+  useEffect(() => {
+    if (!running) qc.invalidateQueries({ queryKey: LAST_UPDATE_KEY });
+  }, [running, qc]);
+  return useQuery({ queryKey: LAST_UPDATE_KEY, queryFn: fetchLastUpdate, staleTime: 60_000 });
 }
 
 /**

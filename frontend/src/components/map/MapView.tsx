@@ -6,6 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Link from "next/link";
 import Supercluster from "supercluster";
+import { useTheme } from "next-themes";
 import type { ListingMarker } from "@/lib/types";
 import { formatPrice, imageVariant } from "@/lib/utils";
 
@@ -17,10 +18,29 @@ L.Icon.Default.mergeOptions({
 
 function shortPrice(price: number | null): string {
   if (!price) return "—";
-  if (price >= 1_000_000) return `€${(price / 1_000_000).toFixed(1)}M`;
-  if (price >= 1_000) return `€${Math.round(price / 1_000)}k`;
-  return `€${price}`;
+  if (price >= 1_000_000) {
+    const millions = (price / 1_000_000).toLocaleString("it-IT", { maximumFractionDigits: price >= 10_000_000 ? 0 : 2 });
+    return `€ ${millions}M`;
+  }
+  if (price >= 1_000) return `€ ${Math.round(price / 1_000)}k`;
+  return `€ ${price}`;
 }
+
+// Basemap: CARTO's light "Voyager" (muted streets, blue water — the look of
+// the big portals' maps) and "Dark Matter" for the dark theme. Free without
+// an API key for personal use; attribution required.
+const TILES = {
+  light: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+};
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+const PIN_BLUE = "#1667e0";
+const PIN_SELECTED = "#0b3b8c";
+const PIN_AUCTION = "#c2410c";
+const HOUSE_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/></svg>';
 
 // Icons are re-requested on every pan; reusing the instances lets Leaflet
 // skip rebuilding the DOM of markers whose icon didn't change.
@@ -35,17 +55,24 @@ function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
   return icon;
 }
 
-function createPriceIcon(price: number | null, highlighted: boolean): L.DivIcon {
+// Pills of variable width: the icon box is 0x0 at the coordinate and the
+// pill is drawn above it, its tail tip exactly on the spot.
+function createPriceIcon(price: number | null, highlighted: boolean, auction: boolean): L.DivIcon {
   const label = shortPrice(price);
-  return cachedIcon(`pin:${label}:${highlighted}`, () => {
-    const bg = highlighted ? "#0f172a" : "#ffffff";
-    const fg = highlighted ? "#ffffff" : "#0f172a";
-    const border = highlighted ? "#0f172a" : "#d4d4d8";
+  return cachedIcon(`pin:${label}:${highlighted}:${auction}`, () => {
+    const bg = highlighted ? PIN_SELECTED : auction ? PIN_AUCTION : PIN_BLUE;
+    const scale = highlighted ? "scale(1.12)" : "";
+    const title = auction ? ' title="Asta"' : "";
     return L.divIcon({
       className: "",
-      html: `<div style="background:${bg};color:${fg};border:1px solid ${border};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.25);white-space:nowrap;font-family:system-ui,sans-serif">${label}</div>`,
-      iconSize: [50, 22],
-      iconAnchor: [25, 11],
+      html:
+        `<div${title} style="position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 6px)) ${scale};transform-origin:50% 100%;font-family:system-ui,sans-serif">` +
+        `<div style="background:${bg};color:#fff;border-radius:6px;padding:2px 7px;font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)">${label}</div>` +
+        `<div style="position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid ${bg}"></div>` +
+        `</div>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+      popupAnchor: [0, -30],
     });
   });
 }
@@ -53,15 +80,15 @@ function createPriceIcon(price: number | null, highlighted: boolean): L.DivIcon 
 function createClusterIcon(count: number, minPrice: number): L.DivIcon {
   const from = Number.isFinite(minPrice) ? shortPrice(minPrice) : "";
   return cachedIcon(`cluster:${count}:${from}`, () => {
-    // Grows with the log of the count so big clusters stand out without
-    // swallowing the map.
-    const size = Math.round(44 + Math.min(20, Math.log2(count) * 3));
-    const fromLine = from ? `<div style="font-size:9px;font-weight:600;opacity:.9">da ${from}</div>` : "";
+    const title = `${count} annunci${from ? `, da ${from}` : ""}`;
     return L.divIcon({
       className: "",
-      html: `<div style="width:${size}px;height:${size}px;border-radius:999px;background:rgba(29,78,216,.9);color:#fff;border:3px solid rgba(255,255,255,.9);box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;font-family:system-ui,sans-serif"><div style="font-size:12px;font-weight:800">${count}</div>${fromLine}</div>`,
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size / 2],
+      html:
+        `<div title="${title}" style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);display:flex;align-items:center;gap:4px;` +
+        `background:${PIN_BLUE};color:#fff;border:2px solid #fff;border-radius:999px;padding:2px 9px 2px 7px;` +
+        `font:700 12px/18px system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35)">${HOUSE_SVG}${count}</div>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
     });
   });
 }
@@ -78,7 +105,7 @@ function ListingPin({
   return (
     <Marker
       position={[m.lat, m.lng]}
-      icon={createPriceIcon(m.price, selected)}
+      icon={createPriceIcon(m.price, selected, m.is_auction)}
       eventHandlers={{ click: () => onClick?.(m.id) }}
       zIndexOffset={selected ? 1000 : 0}
     >
@@ -228,6 +255,18 @@ function ViewportSync({ onChange, enabled }: ViewportSyncProps & { enabled: bool
   return null;
 }
 
+/** Leaflet measures its container once; when the page layout around the
+ *  map changes (filter bar opened, panel switched on mobile) it must be
+ *  told, or tiles and clicks stay mapped to the old size. */
+function InvalidateOnLayoutChange({ layoutKey }: { layoutKey?: string }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 0);
+    return () => clearTimeout(t);
+  }, [layoutKey, map]);
+  return null;
+}
+
 /**
  * Capture map clicks while drawing mode is on. Each click pushes a
  * vertex into the parent's polygon-points state. Hooks into Leaflet's
@@ -267,6 +306,8 @@ interface MapViewProps {
   polygon?: [number, number][] | null;
   /** Called for each click on the map while drawingMode is true. */
   onAddVertex?: (latlng: [number, number]) => void;
+  /** Changes whenever the surrounding layout resizes the map. */
+  layoutKey?: string;
 }
 
 export default function MapView({
@@ -280,7 +321,10 @@ export default function MapView({
   drawingPoints = [],
   polygon = null,
   onAddVertex,
+  layoutKey,
 }: MapViewProps) {
+  const { resolvedTheme } = useTheme();
+  const tiles = resolvedTheme === "dark" ? TILES.dark : TILES.light;
   // Visual style for the drawn perimeter — same primary blue as the rest
   // of the UI, slightly translucent so markers underneath stay readable.
   const polyStyle = { color: "#1d4ed8", weight: 2, fillColor: "#1d4ed8", fillOpacity: 0.10 };
@@ -298,10 +342,8 @@ export default function MapView({
         cursor: drawingMode ? "crosshair" : undefined,
       }}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <TileLayer key={tiles} attribution={TILE_ATTRIBUTION} url={tiles} subdomains="abcd" maxZoom={20} />
+      <InvalidateOnLayoutChange layoutKey={layoutKey} />
       {/* While drawing we don't refetch on every pan — would be confusing. */}
       <ViewportSync onChange={onViewportChange} enabled={!drawingMode} />
       <DrawClickCapture active={drawingMode} onAddVertex={onAddVertex ?? (() => {})} />

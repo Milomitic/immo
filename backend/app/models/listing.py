@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -72,6 +72,8 @@ class Listing(Base):
     # Extra
     condominium_fees: Mapped[float | None] = mapped_column(Float)
     year_built: Mapped[int | None] = mapped_column(Integer)
+    # Judicial / online auction rather than a normal sale (migration 0008).
+    is_auction: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # Timestamps
     publication_date: Mapped[str | None] = mapped_column(Text)  # Original date from source portal

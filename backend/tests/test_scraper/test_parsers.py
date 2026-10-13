@@ -14,6 +14,7 @@ import pytest
 
 from scraper.spiders.base import SearchParams
 from scraper.spiders.casa import CasaSpider
+from scraper.spiders.immobiliare import ImmobiliareSpider
 from scraper.spiders.remax import RemaxSpider
 from scraper.spiders.vistocasa import VistocasaSpider, _build_label_map, _strip_tags
 from scraper.utils.rate_limiter import RateLimiter
@@ -363,3 +364,30 @@ async def test_remax_search_url_scheme():
     assert await spider.build_search_url(SearchParams(city="bari"), 1) == "https://www.remax.it/vendita-case/bari"
     assert await spider.build_search_url(SearchParams(city="Reggio Emilia", listing_type="rent"), 3) == (
         "https://www.remax.it/affitto-case/reggio-emilia?page=3")
+
+
+# -------------------------------------------------------------- immobiliare
+
+
+def _immobiliare_result(listing_id: int, contract: str) -> dict:
+    return {
+        "seo": {"url": f"https://www.immobiliare.it/annunci/{listing_id}/"},
+        "realEstate": {
+            "id": listing_id,
+            "contract": contract,
+            "type": "auction" if contract == "auction" else "ad",
+            "title": "Appartamento",
+            "properties": [{
+                "isMain": True,
+                "caption": "Appartamento a Bari",
+                "location": {"city": "Bari", "latitude": 41.12, "longitude": 16.87},
+                "price": {"value": 120000},
+            }],
+        },
+    }
+
+
+def test_immobiliare_structured_auction_flag():
+    data = {"results": [_immobiliare_result(1, "auction"), _immobiliare_result(2, "sale")]}
+    items = _spider(ImmobiliareSpider)._extract_items(data, SearchParams())
+    assert {i.source_id: i.is_auction for i in items} == {"1": True, "2": False}

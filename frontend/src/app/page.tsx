@@ -3,11 +3,44 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
-import { Search, MapPin, ArrowRight, Map as MapIcon, Sparkles, RefreshCw, Loader2 } from "lucide-react";
+import { Search, MapPin, ArrowRight, Map as MapIcon, Sparkles, RefreshCw, Loader2, Clock } from "lucide-react";
 import { useStats } from "@/hooks/useListings";
-import { useScrapeStatus, useTriggerScrape } from "@/hooks/useScrapeStatus";
+import { useLastUpdate, useScrapeStatus, useTriggerScrape } from "@/hooks/useScrapeStatus";
 import { ApiError } from "@/lib/api";
 import { formatPrice, portalLabel } from "@/lib/utils";
+import type { LastUpdate } from "@/lib/types";
+
+function formatUpdate(iso: string): string {
+  const d = new Date(iso);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString("it-IT", {
+    day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }),
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/** "Ultimo aggiornamento: 13 ott, 17:39 · solo RE/MAX", with every
+ *  portal's own date in the tooltip: a partial scan must not make the
+ *  whole catalogue look fresh. */
+function LastUpdateLabel({ update }: { update: LastUpdate }) {
+  if (!update.finished_at) return null;
+  const perPortal = Object.entries(update.by_portal)
+    .sort(([, a], [, b]) => b.localeCompare(a))
+    .map(([portal, at]) => `${portalLabel(portal)}: ${formatUpdate(at)}`)
+    .join("\n");
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-xs text-[var(--muted-foreground)]"
+      title={`Ultimo aggiornamento per portale:\n${perPortal}`}
+    >
+      <Clock className="h-3.5 w-3.5" />
+      Ultimo aggiornamento: {formatUpdate(update.finished_at)}
+      {!update.is_full && update.portals.length > 0 && (
+        <span className="opacity-80"> · solo {update.portals.map(portalLabel).join(", ")}</span>
+      )}
+    </span>
+  );
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -15,6 +48,7 @@ export default function HomePage() {
   const [listingType, setListingType] = useState("sale");
   const { data: stats } = useStats();
   const { data: scrapeStatus } = useScrapeStatus();
+  const { data: lastUpdate } = useLastUpdate();
   const triggerScrape = useTriggerScrape();
   // A hung worker (stale heartbeat) shouldn't lock the button: the backend
   // already lets a new scan start in that case.
@@ -74,6 +108,7 @@ export default function HomePage() {
                 </>
               )}
             </button>
+            {lastUpdate && <LastUpdateLabel update={lastUpdate} />}
             {triggerError && (
               <span role="alert" className="basis-full text-xs text-[var(--destructive)]">
                 {triggerError}

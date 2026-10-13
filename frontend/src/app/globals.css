@@ -84,13 +84,10 @@ html {
     --attention-bg: rgba(245, 158, 11, 0.15);
 }
 
-/* Dark map: OSM only serves light tiles, so invert them (the hue-rotate
-   keeps water blue and parks green) and theme Leaflet's popups. */
-.dark .leaflet-tile-pane {
-  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
-}
+/* Dark map: the basemap switches to CARTO Dark Matter (see MapView);
+   here only Leaflet's own chrome follows the theme. */
 .dark .leaflet-container {
-  background: #1a1a22;
+  background: #262626;
 }
 .dark .leaflet-popup-content-wrapper,
 .dark .leaflet-popup-tip {

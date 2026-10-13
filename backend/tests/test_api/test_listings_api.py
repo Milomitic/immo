@@ -130,3 +130,41 @@ async def test_price_history_oldest_first(client, seeded, db_session):
     assert [(p["price"], p["observed_at"][:7]) for p in r.json()] == [(165000, "2026-02"), (150000, "2026-05")]
     assert (await client.get(f"/api/v1/listings/{seeded['b']}/price-history")).json() == []
     assert (await client.get("/api/v1/listings/nope/price-history")).status_code == 404
+
+
+@pytest.fixture
+async def dated(db_session):
+    from datetime import datetime, timedelta, timezone
+
+    today = datetime.now(timezone.utc).date()
+    days_ago = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+    db_session.add_all([
+        make_listing(source_id="today", publication_date=days_ago(0)),
+        make_listing(source_id="week", publication_date=days_ago(6)),
+        make_listing(source_id="old", publication_date=days_ago(40), is_auction=True),
+        make_listing(source_id="undated", publication_date=None),
+    ])
+    await db_session.commit()
+    return days_ago
+
+
+async def test_published_within_days_counts_calendar_days(client, dated):
+    assert await get_ids(client, published_within_days=1) == ["today"]
+    assert set(await get_ids(client, published_within_days=7)) == {"today", "week"}
+    assert (await client.get("/api/listings", params={"published_within_days": 0})).status_code == 422
+
+
+async def test_published_after_date(client, dated):
+    assert set(await get_ids(client, published_after=dated(10))) == {"today", "week"}
+
+
+async def test_auction_filter_both_ways(client, dated):
+    assert await get_ids(client, is_auction="true") == ["old"]
+    assert set(await get_ids(client, is_auction="false")) == {"today", "week", "undated"}
+
+
+async def test_map_markers_carry_date_and_auction_flag(client, dated):
+    body = (await client.get("/api/v1/listings/map")).json()
+    by_title = {m["id"]: m for m in body["markers"]}
+    flags = sorted((m["publication_date"] is not None, m["is_auction"]) for m in by_title.values())
+    assert flags == [(False, False), (True, False), (True, False), (True, True)]

@@ -5,6 +5,7 @@ import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "l
 import type { Listing } from "@/lib/types";
 import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
+import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 
@@ -44,6 +45,7 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
               <Badge variant="primary" size="sm" className={portalColor(listing.source_portal)}>
                 {portalLabel(listing.source_portal)}
               </Badge>
+              {listing.is_auction && <AuctionBadge />}
               {isNewListing(listing.first_seen_at) && (
                 <Badge variant="warning" size="sm">Nuovo</Badge>
               )}

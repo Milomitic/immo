@@ -81,6 +81,9 @@ export function useListingFilters() {
   // Set by saved-search links ("vedi i nuovi"); removable like any filter.
   const [firstSeenAfter, setFirstSeenAfter] = useQueryState("first_seen_after", parseAsString);
   const [priceDropSince, setPriceDropSince] = useQueryState("price_drop_since", parseAsString);
+  const [publishedWithinDays, setPublishedWithinDays] = useQueryState("published_within_days", parseAsInteger);
+  const [publishedAfter, setPublishedAfter] = useQueryState("published_after", parseAsString);
+  const [isAuction, setIsAuction] = useQueryState("is_auction", parseAsBoolean);
 
   const values = {
     city, zone, listingType, propertyType,
@@ -89,6 +92,7 @@ export function useListingFilters() {
     energyClass, condition,
     hasElevator, hasBalcony, hasTerrace, hasGarage, hasGarden,
     sourcePortal, firstSeenAfter, priceDropSince,
+    publishedWithinDays, publishedAfter, isAuction,
   };
   const setters = {
     setCity, setZone, setListingType, setPropertyType,
@@ -97,6 +101,7 @@ export function useListingFilters() {
     setEnergyClass, setCondition,
     setHasElevator, setHasBalcony, setHasTerrace, setHasGarage, setHasGarden,
     setSourcePortal, setFirstSeenAfter, setPriceDropSince,
+    setPublishedWithinDays, setPublishedAfter, setIsAuction,
   };
 
   const activeCount = Object.values(values).filter((v) => v !== null && v !== undefined).length;
@@ -108,6 +113,7 @@ export function useListingFilters() {
     setEnergyClass(null); setCondition(null);
     setHasElevator(null); setHasBalcony(null); setHasTerrace(null); setHasGarage(null); setHasGarden(null);
     setSourcePortal(null); setFirstSeenAfter(null); setPriceDropSince(null);
+    setPublishedWithinDays(null); setPublishedAfter(null); setIsAuction(null);
   };
 
   return { values, setters, activeCount, clearAll };
@@ -145,18 +151,35 @@ export function filtersToParams(v: ListingFilterValues): ListingSearchParams {
     source_portal: v.sourcePortal || undefined,
     first_seen_after: v.firstSeenAfter || undefined,
     price_drop_since: v.priceDropSince || undefined,
+    published_within_days: v.publishedWithinDays || undefined,
+    published_after: v.publishedAfter || undefined,
+    // false is meaningful (hide auctions): don't let || swallow it.
+    is_auction: v.isAuction ?? undefined,
   };
 }
 
+/** "Pubblicato" presets: calendar days including today. */
+export const PUBLISHED_OPTIONS: { days: number; label: string }[] = [
+  { days: 1, label: "Oggi" },
+  { days: 3, label: "Ultimi 3 giorni" },
+  { days: 7, label: "Ultima settimana" },
+  { days: 14, label: "Ultime 2 settimane" },
+  { days: 30, label: "Ultimo mese" },
+  { days: 90, label: "Ultimi 3 mesi" },
+];
+
 interface FilterFieldsProps {
   showHeader?: boolean;
+  /** "stack": accordion for sidebars and drawers. "grid": sections side
+   *  by side, always open — the map's filter bar. */
+  layout?: "stack" | "grid";
 }
 
 /**
  * The actual filter form fields. Layout-agnostic: can be dropped into a
  * sticky sidebar, a mobile drawer, or a map popover without extra chrome.
  */
-export function FilterFields({ showHeader = true }: FilterFieldsProps) {
+export function FilterFields({ showHeader = true, layout = "stack" }: FilterFieldsProps) {
   const { values, setters, activeCount, clearAll } = useListingFilters();
   const {
     city, zone, listingType, propertyType,
@@ -164,7 +187,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
     roomsMin, bathroomsMin, floorMin, floorMax,
     energyClass, condition,
     hasElevator, hasBalcony, hasTerrace, hasGarage, hasGarden,
-    sourcePortal,
+    sourcePortal, publishedWithinDays, publishedAfter, isAuction,
   } = values;
   const {
     setCity, setZone, setListingType, setPropertyType,
@@ -172,8 +195,10 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
     setRoomsMin, setBathroomsMin, setFloorMin, setFloorMax,
     setEnergyClass, setCondition,
     setHasElevator, setHasBalcony, setHasTerrace, setHasGarage, setHasGarden,
-    setSourcePortal,
+    setSourcePortal, setPublishedWithinDays, setPublishedAfter, setIsAuction,
   } = setters;
+  const sectionProps = layout === "grid" ? { collapsible: false } : {};
+  const today = new Date().toISOString().slice(0, 10);
 
   const inputClass = "w-full px-3 py-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-shadow";
 
@@ -190,21 +215,62 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       )}
 
-      <FilterSection title="Tipo" count={listingType ? 1 : 0}>
+      <div className={layout === "grid" ? "grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6" : undefined}>
+      <FilterSection {...sectionProps} title="Tipo" count={listingType ? 1 : 0}>
         <div className="flex gap-2">
           <PillButton label="Vendita" active={listingType === "sale"} onClick={() => setListingType(listingType === "sale" ? null : "sale")} />
           <PillButton label="Affitto" active={listingType === "rent"} onClick={() => setListingType(listingType === "rent" ? null : "rent")} />
         </div>
       </FilterSection>
 
-      <FilterSection title="Dove" count={(city ? 1 : 0) + (zone ? 1 : 0)}>
+      <FilterSection {...sectionProps} title="Pubblicato" count={publishedWithinDays || publishedAfter ? 1 : 0}>
+        <div className="space-y-2">
+          <select
+            value={publishedWithinDays ?? ""}
+            onChange={(e) => {
+              setPublishedWithinDays(e.target.value ? parseInt(e.target.value) : null);
+              setPublishedAfter(null);
+            }}
+            className={inputClass}
+            aria-label="Pubblicato nel periodo"
+          >
+            <option value="">Qualsiasi data</option>
+            {PUBLISHED_OPTIONS.map(({ days, label }) => (
+              <option key={days} value={days}>{label}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+            Dal
+            <input
+              type="date"
+              value={publishedAfter ?? ""}
+              max={today}
+              onChange={(e) => {
+                setPublishedAfter(e.target.value || null);
+                setPublishedWithinDays(null);
+              }}
+              className={inputClass}
+            />
+          </label>
+        </div>
+      </FilterSection>
+
+      <FilterSection {...sectionProps} title="Aste" count={isAuction !== null ? 1 : 0}>
+        <div className="flex flex-wrap gap-2">
+          <PillButton label="Tutte" active={isAuction === null} onClick={() => setIsAuction(null)} />
+          <PillButton label="Solo aste" active={isAuction === true} onClick={() => setIsAuction(isAuction === true ? null : true)} />
+          <PillButton label="Escludi aste" active={isAuction === false} onClick={() => setIsAuction(isAuction === false ? null : false)} />
+        </div>
+      </FilterSection>
+
+      <FilterSection {...sectionProps} title="Dove" count={(city ? 1 : 0) + (zone ? 1 : 0)}>
         <div className="space-y-2">
           <input type="text" value={city || ""} onChange={(e) => setCity(e.target.value || null)} placeholder="Citta (es. Roma)" className={inputClass} />
           <input type="text" value={zone || ""} onChange={(e) => setZone(e.target.value || null)} placeholder="Zona (es. Centro)" className={inputClass} />
         </div>
       </FilterSection>
 
-      <FilterSection title="Tipologia" count={propertyType ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Tipologia" count={propertyType ? 1 : 0}>
         <div className="flex flex-wrap gap-2">
           {[
             { value: "apartment", label: "Appartamento" },
@@ -218,7 +284,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Prezzo" count={(priceMin ? 1 : 0) + (priceMax ? 1 : 0)}>
+      <FilterSection {...sectionProps} title="Prezzo" count={(priceMin ? 1 : 0) + (priceMax ? 1 : 0)}>
         <div className="flex gap-2 items-center">
           <div className="relative flex-1">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[var(--muted-foreground)]">EUR</span>
@@ -232,7 +298,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Superficie" count={(areaMin ? 1 : 0) + (areaMax ? 1 : 0)}>
+      <FilterSection {...sectionProps} title="Superficie" count={(areaMin ? 1 : 0) + (areaMax ? 1 : 0)}>
         <div className="flex gap-2 items-center">
           <div className="relative flex-1">
             <input type="number" value={areaMin || ""} onChange={(e) => setAreaMin(e.target.value ? parseInt(e.target.value) : null)} placeholder="Min" className={inputClass} />
@@ -246,7 +312,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Locali" count={roomsMin ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Locali" count={roomsMin ? 1 : 0}>
         <div className="flex gap-1.5">
           {[1, 2, 3, 4, 5].map((n) => (
             <NumberButton key={n} value={n} label={n === 5 ? "5+" : `${n}`} current={roomsMin} onClick={setRoomsMin} />
@@ -254,7 +320,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Bagni" defaultOpen={false} count={bathroomsMin ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Bagni" defaultOpen={false} count={bathroomsMin ? 1 : 0}>
         <div className="flex gap-1.5">
           {[1, 2, 3].map((n) => (
             <NumberButton key={n} value={n} label={n === 3 ? "3+" : `${n}`} current={bathroomsMin} onClick={setBathroomsMin} />
@@ -262,7 +328,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Piano" defaultOpen={false} count={(floorMin ? 1 : 0) + (floorMax ? 1 : 0)}>
+      <FilterSection {...sectionProps} title="Piano" defaultOpen={false} count={(floorMin ? 1 : 0) + (floorMax ? 1 : 0)}>
         <div className="flex gap-2 items-center">
           <select value={floorMin ?? ""} onChange={(e) => setFloorMin(e.target.value ? parseInt(e.target.value) : null)} className={inputClass}>
             <option value="">Da</option>
@@ -288,7 +354,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection
+      <FilterSection {...sectionProps}
         title="Caratteristiche"
         defaultOpen={false}
         count={[hasElevator, hasBalcony, hasTerrace, hasGarage, hasGarden].filter(Boolean).length}
@@ -302,7 +368,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </div>
       </FilterSection>
 
-      <FilterSection title="Classe energetica" defaultOpen={false} count={energyClass ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Classe energetica" defaultOpen={false} count={energyClass ? 1 : 0}>
         <select value={energyClass || ""} onChange={(e) => setEnergyClass(e.target.value || null)} className={inputClass}>
           <option value="">Qualsiasi</option>
           {["A4", "A3", "A2", "A1", "B", "C", "D", "E", "F", "G"].map((c) => (
@@ -311,7 +377,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </select>
       </FilterSection>
 
-      <FilterSection title="Stato immobile" defaultOpen={false} count={condition ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Stato immobile" defaultOpen={false} count={condition ? 1 : 0}>
         <select value={condition || ""} onChange={(e) => setCondition(e.target.value || null)} className={inputClass}>
           <option value="">Qualsiasi</option>
           <option value="nuovo">Nuovo</option>
@@ -321,7 +387,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
         </select>
       </FilterSection>
 
-      <FilterSection title="Fonte" defaultOpen={false} count={sourcePortal ? 1 : 0}>
+      <FilterSection {...sectionProps} title="Fonte" defaultOpen={false} count={sourcePortal ? 1 : 0}>
         <div className="flex flex-wrap gap-2">
           {[
             { value: "immobiliare", label: "Immobiliare.it" },
@@ -335,6 +401,7 @@ export function FilterFields({ showHeader = true }: FilterFieldsProps) {
           ))}
         </div>
       </FilterSection>
+      </div>
     </div>
   );
 }

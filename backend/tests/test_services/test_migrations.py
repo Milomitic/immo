@@ -173,3 +173,34 @@ async def test_fulltext_index_follows_inserts_updates_and_deletes(tmp_path):
         await conn.execute(text("DELETE FROM listings WHERE id = 'a'"))
     assert await hits('"mare"') == []
     await engine.dispose()
+
+
+async def test_auction_flag_is_backfilled_without_breaking_search_index(tmp_path):
+    engine = _engine(tmp_path, "auction.db")
+    from alembic import command
+
+    from app.database import _alembic_config
+
+    cfg = _alembic_config()
+
+    def _to_0007(sync_conn):
+        cfg.attributes["connection"] = sync_conn
+        command.upgrade(cfg, "0007")
+
+    async with engine.begin() as conn:
+        await conn.run_sync(_to_0007)
+        await conn.execute(_INSERT_LISTING, {"id": "a", "price": 1, "prev": None, "changed": None})
+        await conn.execute(_INSERT_LISTING, {"id": "b", "price": 1, "prev": None, "changed": None})
+        await conn.execute(text("UPDATE listings SET title = 'IMMOBILE IN ASTA' WHERE id = 'a'"))
+
+    await init_db(engine)
+    async with engine.connect() as conn:
+        flags = dict((await conn.execute(text("SELECT id, is_auction FROM listings"))).all())
+        triggers = {r[0] for r in await conn.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'"))}
+        hits = (await conn.execute(text(
+            "SELECT count(*) FROM listings_fts WHERE listings_fts MATCH '\"asta\"'"
+        ))).scalar()
+    assert flags == {"a": 1, "b": 0}
+    assert {"listings_fts_ai", "listings_fts_ad", "listings_fts_au"} <= triggers
+    assert hits == 1
+    await engine.dispose()

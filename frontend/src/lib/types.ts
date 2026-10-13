@@ -36,6 +36,8 @@ export interface Listing {
   condominium_fees: number | null;
   year_built: number | null;
   publication_date: string | null;
+  /** Judicial / online auction rather than a normal sale. */
+  is_auction: boolean;
   created_at: string;
   updated_at: string;
   first_seen_at: string;
@@ -131,6 +133,12 @@ export interface ListingSearchParams {
   first_seen_after?: string;
   /** ISO instant: only listings whose price dropped after it. */
   price_drop_since?: string;
+  /** Published on the portal in the last N calendar days (1 = today). */
+  published_within_days?: number;
+  /** Published on the portal on/after this date (YYYY-MM-DD). */
+  published_after?: string;
+  /** true: auctions only; false: hide auctions. */
+  is_auction?: boolean;
   sort?: string;
   page?: number;
   page_size?: number;
@@ -149,6 +157,8 @@ export interface ListingMarker {
   area_sqm: number | null;
   rooms: number | null;
   thumbnail: string | null;
+  publication_date: string | null;
+  is_auction: boolean;
 }
 
 export interface ListingMarkersResponse {
@@ -196,6 +206,15 @@ export interface ScrapeStatus {
   progress_total: number;
   phase: string | null;
   runs: ScrapeRun[];
+}
+
+/** When the catalogue was last refreshed, overall and per portal. */
+export interface LastUpdate {
+  finished_at: string | null;
+  /** Portals in the most recent job; fewer than all when it was partial. */
+  portals: string[];
+  is_full: boolean;
+  by_portal: Record<string, string>;
 }
 
 export interface ScrapeTriggerResponse {

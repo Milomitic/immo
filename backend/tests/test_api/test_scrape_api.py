@@ -141,3 +141,31 @@ async def test_unversioned_alias_still_works_but_is_hidden(client):
     paths = (await client.get("/openapi.json")).json()["paths"]
     assert "/api/v1/stats" in paths
     assert "/api/stats" not in paths
+
+
+async def test_last_update_reports_partial_jobs_and_per_portal_dates(client, db_session, monkeypatch):
+    from app.services import scrape_service
+
+    monkeypatch.setattr(scrape_service, "enabled_portals", lambda: ["casa", "remax"])
+    monkeypatch.setattr("app.api.scrape.enabled_portals", lambda: ["casa", "remax"])
+    assert (await client.get("/api/v1/scrape/last-update")).json()["finished_at"] is None
+
+    db_session.add_all([
+        ScrapeRun(portal="casa", status="completed", started_at="2026-05-24T01:00:00+00:00",
+                  finished_at="2026-05-24T02:00:00+00:00", job_id="full"),
+        ScrapeRun(portal="remax", status="completed_with_errors", started_at="2026-05-24T01:00:00+00:00",
+                  finished_at="2026-05-24T01:30:00+00:00", job_id="full"),
+        ScrapeRun(portal="remax", status="completed", started_at="2026-10-13T15:32:00+00:00",
+                  finished_at="2026-10-13T15:39:00+00:00", job_id="partial"),
+        ScrapeRun(portal="casa", status="failed", started_at="2026-10-14T08:00:00+00:00",
+                  finished_at="2026-10-14T08:01:00+00:00", job_id="broken"),
+    ])
+    await db_session.commit()
+
+    body = (await client.get("/api/v1/scrape/last-update")).json()
+    assert body["finished_at"] == "2026-10-13T15:39:00+00:00"  # the failed run doesn't count
+    assert (body["portals"], body["is_full"]) == (["remax"], False)
+    assert body["by_portal"] == {
+        "casa": "2026-05-24T02:00:00+00:00",
+        "remax": "2026-10-13T15:39:00+00:00",
+    }

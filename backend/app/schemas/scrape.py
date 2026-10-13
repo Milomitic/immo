@@ -53,6 +53,16 @@ class ScrapeErrorResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LastUpdateResponse(BaseModel):
+    """When the catalogue was last refreshed. A job may have covered only
+    some portals (a single-portal run), so ``is_full`` says whether every
+    enabled portal was in it and ``by_portal`` gives each one's own date."""
+    finished_at: str | None = None
+    portals: list[str] = []
+    is_full: bool = False
+    by_portal: dict[str, str] = {}
+
+
 class ScrapeStatusResponse(BaseModel):
     """Aggregated status of the most recent scrape *job* — the set of
     per-portal runs sharing a common start window. Designed to drive a

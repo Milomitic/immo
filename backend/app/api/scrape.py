@@ -9,13 +9,14 @@ shared DB, so API restarts never interrupt it.
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_admin
 from app.config import settings
 from app.models.scrape_run import ScrapeError, ScrapeRun
 from app.schemas.scrape import (
+    LastUpdateResponse,
     ScrapeErrorResponse,
     ScrapeRunResponse,
     ScrapeStatusResponse,
@@ -162,6 +163,51 @@ async def list_recent_runs(
 ) -> list[ScrapeRunResponse]:
     result = await db.execute(select(ScrapeRun).order_by(ScrapeRun.started_at.desc()).limit(limit))
     return [ScrapeRunResponse.model_validate(r) for r in result.scalars().all()]
+
+
+_FINISHED = ("completed", "completed_with_errors")
+
+
+@router.get("/last-update", response_model=LastUpdateResponse)
+async def last_update(db: AsyncSession = Depends(get_db)) -> LastUpdateResponse:
+    """The most recent finished scrape job, and each portal's latest
+    finished run. Failed runs don't count as an update."""
+    rows = (
+        await db.execute(
+            select(ScrapeRun.portal, func.max(ScrapeRun.finished_at))
+            .where(ScrapeRun.status.in_(_FINISHED), ScrapeRun.finished_at.isnot(None))
+            .group_by(ScrapeRun.portal)
+        )
+    ).all()
+    by_portal = {portal: finished for portal, finished in rows}
+    if not by_portal:
+        return LastUpdateResponse()
+
+    latest = (
+        await db.execute(
+            select(ScrapeRun)
+            .where(ScrapeRun.status.in_(_FINISHED), ScrapeRun.finished_at.isnot(None))
+            .order_by(ScrapeRun.finished_at.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    if latest.job_id:
+        job = (
+            await db.execute(
+                select(ScrapeRun).where(
+                    ScrapeRun.job_id == latest.job_id, ScrapeRun.status.in_(_FINISHED)
+                )
+            )
+        ).scalars().all()
+    else:  # legacy rows without job_id: the run alone
+        job = [latest]
+    portals = sorted({r.portal for r in job})
+    return LastUpdateResponse(
+        finished_at=max(r.finished_at for r in job),
+        portals=portals,
+        is_full=set(enabled_portals()) <= set(portals),
+        by_portal=by_portal,
+    )
 
 
 @router.get("/runs/{run_id}/errors", response_model=list[ScrapeErrorResponse])

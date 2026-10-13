@@ -265,6 +265,28 @@ def detect_feature(text: str | None, *keywords: str) -> bool | None:
     return not _NEGATION_BEFORE.search(window)
 
 
+# In a title, the bare word is enough ("IMMOBILE IN ASTA", "Asta appartamento
+# a Bari"). Descriptions mention many things, so only phrases that describe
+# the sale itself count. Measured on the catalogue (2026-10-13): 381 hits,
+# no false positives in the samples.
+_AUCTION_TITLE = re.compile(r"\bast[ae]\b", re.IGNORECASE)
+_AUCTION_TEXT = re.compile(
+    r"\b(?:all['’`]\s?asta|in asta"
+    r"|ast[ae] (?:giudiziari[ae]|telematic(?:a|he)|immobiliar[ei]|fallimentar[ei]|pubblic(?:a|he)|on ?line)"
+    r"|vendit[ae] (?:giudiziari[ae]|senza incanto|all['’`]incanto|competitiva)"
+    r"|base d['’`]\s?asta|procedura esecutiva|esecuzion[ei] immobiliar[ei]|offerta minima|asta del \d)",
+    re.IGNORECASE,
+)
+
+
+def detect_auction(title: str | None, description: str | None) -> bool:
+    """Whether a listing is a (judicial) auction rather than a normal sale."""
+    return bool(
+        (title and _AUCTION_TITLE.search(title))
+        or (description and _AUCTION_TEXT.search(description))
+    )
+
+
 def yes_no(value) -> bool | None:
     """Map a structured feature value ("sì", "No", 1, True, "presente") to
     a bool; None for anything unrecognisable."""

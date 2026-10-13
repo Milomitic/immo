@@ -11,7 +11,7 @@ from app.models.listing import Listing, ListingPriceHistory, ListingSource
 from app.services.dedup_service import find_duplicate
 from app.utils.text import normalize_address
 from scraper.items import ListingItem
-from scraper.utils.html_extract import clamp_italy_coords, clamp_publication_date
+from scraper.utils.html_extract import clamp_italy_coords, clamp_publication_date, detect_auction
 
 logger = structlog.get_logger()
 
@@ -117,6 +117,17 @@ def _track_price(db: AsyncSession, listing: Listing, before: float | None, porta
     db.add(ListingPriceHistory(
         listing_id=listing.id, price=listing.price, source_portal=portal, observed_at=now,
     ))
+
+
+def _is_auction(item: ListingItem) -> bool:
+    return item.is_auction or detect_auction(item.title, item.description)
+
+
+def _mark_auction(listing: Listing, item: ListingItem) -> None:
+    # One-way: any observation saying "auction" is enough (a portal
+    # without a structured flag can't prove the opposite).
+    if _is_auction(item):
+        listing.is_auction = True
 
 
 # Keep IN (...) lists under SQLite's bound-parameter limit.
@@ -385,6 +396,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         else:
             _enrich_listing(existing, item, now)
         _track_price(db, existing, before, item.source_portal, now)
+        _mark_auction(existing, item)
         return "updated"
 
     # Step 2: Check cross-portal duplicate
@@ -431,6 +443,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         else:
             _enrich_listing(duplicate, item, now)
         _track_price(db, duplicate, before, item.source_portal, now)
+        _mark_auction(duplicate, item)
         logger.info("dedup_merged", portal=item.source_portal, source_id=item.source_id, canonical_id=duplicate.id)
         return "duplicate"
 
@@ -474,6 +487,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         condominium_fees=item.condominium_fees,
         year_built=item.year_built,
         publication_date=item.publication_date,
+        is_auction=_is_auction(item),
         created_at=now,
         updated_at=now,
         first_seen_at=now,

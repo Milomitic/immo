@@ -3,6 +3,7 @@
 import { useQueryState, parseAsInteger, parseAsString, parseAsBoolean } from "nuqs";
 import { Badge } from "@/components/ui/Badge";
 import { formatPriceCompact, portalLabel, propertyTypeLabel } from "@/lib/utils";
+import { PUBLISHED_OPTIONS } from "./FilterFields";
 
 const dayMonth = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short" });
 const shortDate = (iso: string) => {
@@ -35,11 +36,23 @@ export function ActiveFilters() {
   const [q, setQ] = useQueryState("q", parseAsString);
   const [firstSeenAfter, setFirstSeenAfter] = useQueryState("first_seen_after", parseAsString);
   const [priceDropSince, setPriceDropSince] = useQueryState("price_drop_since", parseAsString);
+  const [publishedWithinDays, setPublishedWithinDays] = useQueryState("published_within_days", parseAsInteger);
+  const [publishedAfter, setPublishedAfter] = useQueryState("published_after", parseAsString);
+  const [isAuction, setIsAuction] = useQueryState("is_auction", parseAsBoolean);
 
   const filters: { label: string; clear: () => void }[] = [];
 
   if (q) filters.push({ label: `Testo: "${q}"`, clear: () => setQ(null) });
   if (firstSeenAfter) filters.push({ label: `Nuovi dal ${shortDate(firstSeenAfter)}`, clear: () => setFirstSeenAfter(null) });
+  if (publishedWithinDays) {
+    const preset = PUBLISHED_OPTIONS.find((o) => o.days === publishedWithinDays);
+    filters.push({
+      label: `Pubblicati: ${(preset?.label ?? `ultimi ${publishedWithinDays} giorni`).toLowerCase()}`,
+      clear: () => setPublishedWithinDays(null),
+    });
+  }
+  if (publishedAfter) filters.push({ label: `Pubblicati dal ${shortDate(publishedAfter)}`, clear: () => setPublishedAfter(null) });
+  if (isAuction !== null) filters.push({ label: isAuction ? "Solo aste" : "Senza aste", clear: () => setIsAuction(null) });
   if (priceDropSince) filters.push({ label: `Ribassi dal ${shortDate(priceDropSince)}`, clear: () => setPriceDropSince(null) });
 
   // Polygon chip first — it's the most "physical" filter, easy to

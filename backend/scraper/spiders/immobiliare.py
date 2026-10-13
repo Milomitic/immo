@@ -464,6 +464,7 @@ class ImmobiliareSpider(BaseSpider):
                 has_garage="garage" in ga4_str or "box" in ga4_str,
                 has_garden="giardino" in ga4_str,
                 publication_date=publication_date,
+                is_auction=re_data.get("contract") == "auction" or re_data.get("type") == "auction",
                 raw_data={"realEstate_id": listing_id},
             ))
 

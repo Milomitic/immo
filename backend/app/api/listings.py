@@ -61,6 +61,9 @@ async def list_listings(
     polygon: str | None = None,
     first_seen_after: str | None = None,
     price_drop_since: str | None = None,
+    published_within_days: int | None = Query(default=None, ge=1, le=3650),
+    published_after: str | None = None,
+    is_auction: bool | None = None,
     sort: str = "newest",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -81,6 +84,8 @@ async def list_listings(
         year_built_min=year_built_min, year_built_max=year_built_max,
         lat=lat, lng=lng, radius_km=radius_km, bbox=bbox, polygon=polygon,
         first_seen_after=first_seen_after, price_drop_since=price_drop_since,
+        published_within_days=published_within_days, published_after=published_after,
+        is_auction=is_auction,
         sort=sort, page=page, page_size=page_size,
     )
     return await search_listings(db, params)
@@ -120,6 +125,9 @@ async def list_listing_markers(
     polygon: str | None = None,
     first_seen_after: str | None = None,
     price_drop_since: str | None = None,
+    published_within_days: int | None = Query(default=None, ge=1, le=3650),
+    published_after: str | None = None,
+    is_auction: bool | None = None,
     limit: int = Query(default=2000, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
 ) -> ListingMarkersResponse:
@@ -138,6 +146,8 @@ async def list_listing_markers(
         year_built_min=year_built_min, year_built_max=year_built_max,
         bbox=bbox, polygon=polygon,
         first_seen_after=first_seen_after, price_drop_since=price_drop_since,
+        published_within_days=published_within_days, published_after=published_after,
+        is_auction=is_auction,
     )
     return await get_listing_markers(db, params, limit=limit)
 

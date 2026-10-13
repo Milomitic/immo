@@ -321,3 +321,25 @@ async def test_refresh_source_urls_follows_portal_url_migration(db_session):
     assert rows["9"].listing_url == "https://imm/9"
     src = (await db_session.execute(select(ListingSource))).scalar_one()
     assert src.source_url == new
+
+
+async def test_auctions_are_flagged_from_text_or_structure(db_session):
+    await process_items_batch([
+        item(source_id="t", title="IMMOBILE IN ASTA - RESIDENZIALE", address="Via A 1", lat=41.10),
+        item(source_id="s", title="Appartamento", is_auction=True, address="Via B 2", lat=41.11),
+        item(source_id="n", title="Trilocale luminoso", address="Via C 3", lat=41.13),
+    ], "run")
+    flags = {r.source_id: r.is_auction for r in (await db_session.execute(select(Listing))).scalars()}
+    assert flags == {"t": True, "s": True, "n": False}
+
+
+async def test_a_duplicate_can_reveal_an_auction(db_session):
+    await process_items_batch([item()], "run-1")
+    await process_items_batch(
+        [item(source_portal="casa", source_id="c-1", source_url="https://casa.it/c-1",
+              description="Vendita giudiziaria, offerte entro il 30")],
+        "run-2",
+    )
+    db_session.expire_all()
+    row = (await db_session.execute(select(Listing))).scalar_one()
+    assert row.is_auction is True

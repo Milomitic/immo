@@ -41,5 +41,8 @@ class ListingItem:
     condominium_fees: float | None = None
     year_built: int | None = None
     publication_date: str | None = None  # ISO 8601 date from source portal
+    # Set by spiders that have a structured flag (immobiliare's contract);
+    # the pipeline also recognises auctions from title/description.
+    is_auction: bool = False
 
     raw_data: dict = field(default_factory=dict)

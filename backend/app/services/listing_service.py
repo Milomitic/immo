@@ -1,6 +1,7 @@
 import json
 import math
 import re
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +58,7 @@ def listing_to_response(listing: Listing) -> ListingResponse:
         has_garden=listing.has_garden,
         condominium_fees=listing.condominium_fees,
         year_built=listing.year_built,
+        is_auction=bool(listing.is_auction),
         publication_date=listing.publication_date,
         created_at=listing.created_at,
         updated_at=listing.updated_at,
@@ -189,6 +191,14 @@ def _apply_listing_filters(query, params: ListingSearchParams, use_fts: bool = F
         query = query.where(Listing.year_built >= params.year_built_min)
     if params.year_built_max is not None:
         query = query.where(Listing.year_built <= params.year_built_max)
+    if params.is_auction is not None:
+        query = query.where(Listing.is_auction.is_(params.is_auction))
+    if params.published_within_days:
+        today = datetime.now(timezone.utc).date()
+        since = today - timedelta(days=params.published_within_days - 1)
+        query = query.where(Listing.publication_date >= since.isoformat())
+    if params.published_after:
+        query = query.where(Listing.publication_date >= params.published_after[:10])
     if params.first_seen_after:
         query = query.where(Listing.first_seen_at > params.first_seen_after)
     if params.price_drop_since:
@@ -387,6 +397,8 @@ async def get_listing_markers(
         Listing.area_sqm,
         Listing.rooms,
         Listing.images,
+        Listing.publication_date,
+        Listing.is_auction,
     ).where(Listing.lat.isnot(None), Listing.lng.isnot(None))
     query = _apply_listing_filters(query, params, use_fts=bool(params.q) and await has_search_index(db))
 
@@ -439,6 +451,8 @@ async def get_listing_markers(
                 area_sqm=row.area_sqm,
                 rooms=row.rooms,
                 thumbnail=thumbnail,
+                publication_date=row.publication_date,
+                is_auction=bool(row.is_auction),
             )
         )
 

@@ -35,6 +35,9 @@ function describe(f: Record<string, string>): string[] {
   if (f.energy_class) out.push(`Classe ${f.energy_class}`);
   for (const [key, label] of Object.entries(FEATURES)) if (f[key] === "true") out.push(label);
   if (f.source_portal) out.push(`Fonte: ${portalLabel(f.source_portal)}`);
+  if (f.published_within_days) out.push(`Pubblicati negli ultimi ${f.published_within_days} giorni`);
+  if (f.published_after) out.push(`Pubblicati dal ${f.published_after}`);
+  if (f.is_auction) out.push(f.is_auction === "true" ? "Solo aste" : "Senza aste");
   if (f.polygon) out.push("Area disegnata");
   if (f.q) out.push(`"${f.q}"`);
   return out.length ? out : ["Tutti gli annunci"];

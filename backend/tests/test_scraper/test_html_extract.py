@@ -5,6 +5,7 @@ import pytest
 from scraper.utils.html_extract import (
     clamp_italy_coords,
     clamp_publication_date,
+    detect_auction,
     detect_feature,
     map_property_type,
     parse_float_text,
@@ -136,3 +137,24 @@ def test_parse_int_and_float():
     assert parse_int(None) is None
     assert parse_float_text("1.250,50 €") == 1250.5
     assert parse_float_text("85 m²") == 85.0
+
+
+@pytest.mark.parametrize("title, description", [
+    ("IMMOBILE IN ASTA - RESIDENZIALE", None),
+    ("Asta appartamento a Bari (BA) Corso Umberto I", None),
+    ("Trilocale in Vendita a Bari", "Vendita all'asta senza incanto, con gara telematica"),
+    ("Villa in Vendita", "Vendesi in asta giudiziaria, due ville"),
+    ("Trilocale", "Trattasi di vendita giudiziaria con assistenza di A.P.I. Srl"),
+    ("Bilocale", "Prezzo base d'asta 80.000 euro, offerta minima 60.000"),
+])
+def test_detect_auction(title, description):
+    assert detect_auction(title, description)
+
+
+@pytest.mark.parametrize("title, description", [
+    ("Trilocale con vasta terrazza", "Ampia e vasta zona giorno"),  # "vasta" isn't "asta"
+    ("Casa al mare", "Asta della bandiera sul terrazzo"),  # bare word only counts in titles
+    (None, None),
+])
+def test_detect_auction_negatives(title, description):
+    assert not detect_auction(title, description)

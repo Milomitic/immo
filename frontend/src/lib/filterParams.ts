@@ -16,6 +16,7 @@ export const FILTER_PARAM_KEYS = [
   "floor_min", "floor_max",
   "price_per_sqm_min", "price_per_sqm_max",
   "year_built_min", "year_built_max",
+  "published_within_days", "published_after", "is_auction",
   "polygon",
 ] as const;
 
