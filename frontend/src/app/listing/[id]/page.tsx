@@ -5,13 +5,14 @@ import Link from "next/link";
 import {
   MapPin, Maximize2, BedDouble, Bath, Building2,
   Layers, ExternalLink, ChevronLeft, ChevronRight, Car, Trees,
-  Fence, Home, Expand, Map as MapIcon,
+  Fence, Home, Expand, Map as MapIcon, Clock,
 } from "lucide-react";
 import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo, imageVariant } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo, imageVariant } from "@/lib/utils";
 import { ListingCard } from "@/components/listings/ListingCard";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
+import { PublishedAt } from "@/components/listings/PublishedAt";
 import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
@@ -350,11 +351,15 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
 
             {/* Timestamps */}
             <div className="text-xs text-[var(--muted-foreground)] space-y-1 px-1">
-              {listing.publication_date && (
-                <div>Pubblicato sul portale: {publishedAgo(listing.publication_date)}</div>
-              )}
-              <div>Primo avvistamento: {seenAgo(listing.first_seen_at)}</div>
-              <div>Ultimo aggiornamento: {seenAgo(listing.last_seen_at)}</div>
+              <PublishedAt date={listing.publication_date} className="text-sm text-[var(--foreground)]" iconClassName="h-3.5 w-3.5" />
+              <div className="flex items-center gap-1">
+                <Clock className="h-3 w-3 shrink-0" aria-hidden />
+                Primo avvistamento: {seenAgo(listing.first_seen_at)}
+              </div>
+              <div className="flex items-center gap-1">
+                <Clock className="h-3 w-3 shrink-0" aria-hidden />
+                Ultimo aggiornamento: {seenAgo(listing.last_seen_at)}
+              </div>
             </div>
           </div>
         </div>

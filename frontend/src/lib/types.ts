@@ -159,6 +159,8 @@ export interface ListingMarker {
   thumbnail: string | null;
   publication_date: string | null;
   is_auction: boolean;
+  /** Portal of the canonical listing (where the data comes from). */
+  source_portal: string;
 }
 
 export interface ListingMarkersResponse {

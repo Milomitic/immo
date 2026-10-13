@@ -168,3 +168,4 @@ async def test_map_markers_carry_date_and_auction_flag(client, dated):
     by_title = {m["id"]: m for m in body["markers"]}
     flags = sorted((m["publication_date"] is not None, m["is_auction"]) for m in by_title.values())
     assert flags == [(False, False), (True, False), (True, False), (True, True)]
+    assert {m["source_portal"] for m in body["markers"]} == {"immobiliare"}

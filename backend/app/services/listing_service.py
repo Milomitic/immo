@@ -399,6 +399,7 @@ async def get_listing_markers(
         Listing.images,
         Listing.publication_date,
         Listing.is_auction,
+        Listing.source_portal,
     ).where(Listing.lat.isnot(None), Listing.lng.isnot(None))
     query = _apply_listing_filters(query, params, use_fts=bool(params.q) and await has_search_index(db))
 
@@ -452,6 +453,7 @@ async def get_listing_markers(
                 rooms=row.rooms,
                 thumbnail=thumbnail,
                 publication_date=row.publication_date,
+                source_portal=row.source_portal,
                 is_auction=bool(row.is_auction),
             )
         )

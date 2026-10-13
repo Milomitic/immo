@@ -10,26 +10,37 @@ import { useListingDetail } from "@/hooks/useListings";
 import type { ListingMarker } from "@/lib/types";
 import {
   cn, conditionLabel, energyClassColor, floorLabel, formatArea, formatPrice,
-  imageVariant, portalLabel, publishedSince, roomsLabel,
+  imageVariant, portalColor, portalLabel, roomsLabel,
 } from "@/lib/utils";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
+import { PublishedAt } from "@/components/listings/PublishedAt";
 
 export type MapListItemMode = "normal" | "compact" | "expanded";
 
-const fullDate = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", year: "numeric" });
-
-function PostedAt({ date, className }: { date: string | null; className?: string }) {
-  const since = publishedSince(date);
-  if (!since || !date) return null;
+function PortalLabel({ portal }: { portal: string }) {
+  if (!portal) return null;
   return (
     <span
-      className={cn("shrink-0 text-[10px] text-[var(--muted-foreground)] whitespace-nowrap", className)}
-      title={`Pubblicato il ${fullDate.format(new Date(`${date.slice(0, 10)}T00:00:00`))}`}
+      className={cn(
+        "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white",
+        portalColor(portal),
+      )}
+      title={`Annuncio da ${portalLabel(portal)}`}
     >
-      Pubblicato {since}
+      {portalLabel(portal)}
     </span>
+  );
+}
+
+function PostedAt({ date, className }: { date: string | null; className?: string }) {
+  return (
+    <PublishedAt
+      date={date}
+      className={cn("shrink-0 text-xs text-[var(--muted-foreground)]", className)}
+      iconClassName="h-3.5 w-3.5"
+    />
   );
 }
 
@@ -98,6 +109,7 @@ export function MapListItem({ marker: m, mode, highlighted, onToggle, onHover }:
               {m.price ? formatPrice(m.price) : "Su richiesta"}
             </span>
             {m.is_auction && <AuctionBadge />}
+            <PortalLabel portal={m.source_portal} />
             <span className="text-xs truncate text-[var(--muted-foreground)]">{m.title}</span>
             <PostedAt date={m.publication_date} className="ml-auto" />
           </div>
@@ -108,7 +120,10 @@ export function MapListItem({ marker: m, mode, highlighted, onToggle, onHover }:
                 {m.price ? formatPrice(m.price) : "Prezzo su richiesta"}
               </span>
               {m.is_auction && <AuctionBadge />}
-              {expanded && <ChevronUp className="h-4 w-4 ml-auto text-[var(--muted-foreground)]" aria-hidden />}
+              <span className="ml-auto flex items-center gap-1.5">
+                <PortalLabel portal={m.source_portal} />
+                {expanded && <ChevronUp className="h-4 w-4 text-[var(--muted-foreground)]" aria-hidden />}
+              </span>
             </div>
             <div className="text-xs font-medium truncate mt-0.5">
               {m.rooms ? roomsLabel(m.rooms) + " · " : ""}
@@ -286,12 +301,12 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
                 <p className="text-xs leading-relaxed whitespace-pre-line text-[var(--foreground)]/90">{listing.description}</p>
               )}
 
-              <p className="text-[11px] text-[var(--muted-foreground)]">
-                {portalLabel(listing.source_portal)}
-                {listing.sources.length > 1 ? ` + altre ${listing.sources.length - 1} fonti` : ""}
-                {listing.publication_date
-                  ? ` · pubblicato il ${fullDate.format(new Date(`${listing.publication_date.slice(0, 10)}T00:00:00`))}`
-                  : ""}
+              <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-[var(--muted-foreground)]">
+                <span>
+                  {portalLabel(listing.source_portal)}
+                  {listing.sources.length > 1 ? ` + altre ${listing.sources.length - 1} fonti` : ""}
+                </span>
+                <PublishedAt date={listing.publication_date} />
               </p>
             </div>
           </>

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
+import { PublishedAt } from "@/components/listings/PublishedAt";
 
 interface ListingCardProps {
   listing: Listing;
@@ -137,7 +138,7 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
 
         {/* Footer */}
         <div className="flex items-center justify-between mt-2.5 text-xs text-[var(--muted-foreground)]">
-          <span>{publishedAgo(listing.publication_date) ?? "Data non disponibile"}</span>
+          <PublishedAt date={listing.publication_date} fallback="Data non disponibile" />
           {onCompareToggle && (
             <label className="flex items-center gap-1.5 cursor-pointer hover:text-[var(--primary)] transition-colors" onClick={(e) => e.stopPropagation()}>
               <input

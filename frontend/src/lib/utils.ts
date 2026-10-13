@@ -196,14 +196,6 @@ export function publishedSince(dateStr: string | null | undefined): string | nul
 }
 
 /**
- * Format a publication_date as "Pubblicato X fa". Returns null when missing.
- */
-export function publishedAgo(dateStr: string | null | undefined): string | null {
-  const since = publishedSince(dateStr);
-  return since ? `Pubblicato ${since}` : null;
-}
-
-/**
  * Format a first_seen_at / last_seen_at timestamp. These represent when *we*
  * observed the listing, not when it was posted — always label them clearly.
  */

@@ -158,6 +158,7 @@ class ListingMarker(BaseModel):
     thumbnail: str | None = None
     publication_date: str | None = None
     is_auction: bool = False
+    source_portal: str = ""
 
     model_config = {"from_attributes": True}
 

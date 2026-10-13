@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
+import { PublishedAt } from "@/components/listings/PublishedAt";
 
 interface ListingCardListProps {
   listing: Listing;
@@ -128,7 +129,7 @@ export function ListingCardList({ listing, onCompareToggle, isCompareSelected }:
         {/* Footer */}
         <div className="mt-auto flex items-center justify-between text-xs text-[var(--muted-foreground)] pt-3 border-t border-[var(--border)]">
           <div className="flex items-center gap-3">
-            <span>{publishedAgo(listing.publication_date) ?? "Data non disponibile"}</span>
+            <PublishedAt date={listing.publication_date} fallback="Data non disponibile" />
             {listing.source_count > 1 && (
               <span className="flex items-center gap-1 text-purple-600">
                 <Layers className="h-3 w-3" /> {listing.source_count} fonti
