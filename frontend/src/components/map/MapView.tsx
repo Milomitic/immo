@@ -27,14 +27,36 @@ function shortPrice(price: number | null): string {
 }
 
 // Basemap: CARTO's light "Voyager" (muted streets, blue water — the look of
-// the big portals' maps) and "Dark Matter" for the dark theme. Free without
-// an API key for personal use; attribution required.
-const TILES = {
-  light: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-};
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+// the big portals' maps) and "Dark Matter" for the dark theme. Since August
+// 2026 CARTO needs a free key (carto.com/basemaps/apikey); without one, or
+// with a wrong one, it still answers 200 with "API KEY REQUIRED" drawn into
+// every tile. So without a key we fall back to plain OpenStreetMap tiles,
+// darkened by CSS in the dark theme.
+const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_API_KEY?.trim();
+const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+interface Basemap {
+  url: string;
+  attribution: string;
+  subdomains?: string;
+  className?: string;
+}
+
+function basemap(dark: boolean): Basemap {
+  if (CARTO_KEY) {
+    const style = dark ? "dark_all" : "rastertiles/voyager";
+    return {
+      url: `https://basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(CARTO_KEY)}`,
+      attribution: `${OSM_ATTRIBUTION} &copy; <a href="https://carto.com/attributions">CARTO</a>`,
+    };
+  }
+  return {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    subdomains: "abc",
+    attribution: OSM_ATTRIBUTION,
+    className: dark ? "tiles-dark" : undefined,
+  };
+}
 
 const PIN_BLUE = "#1667e0";
 const PIN_SELECTED = "#0b3b8c";
@@ -324,7 +346,7 @@ export default function MapView({
   layoutKey,
 }: MapViewProps) {
   const { resolvedTheme } = useTheme();
-  const tiles = resolvedTheme === "dark" ? TILES.dark : TILES.light;
+  const tiles = basemap(resolvedTheme === "dark");
   // Visual style for the drawn perimeter — same primary blue as the rest
   // of the UI, slightly translucent so markers underneath stay readable.
   const polyStyle = { color: "#1d4ed8", weight: 2, fillColor: "#1d4ed8", fillOpacity: 0.10 };
@@ -342,7 +364,14 @@ export default function MapView({
         cursor: drawingMode ? "crosshair" : undefined,
       }}
     >
-      <TileLayer key={tiles} attribution={TILE_ATTRIBUTION} url={tiles} subdomains="abcd" maxZoom={20} />
+      <TileLayer
+        key={`${tiles.url}|${tiles.className ?? ""}`}
+        url={tiles.url}
+        attribution={tiles.attribution}
+        subdomains={tiles.subdomains ?? "abc"}
+        className={tiles.className}
+        maxZoom={19}
+      />
       <InvalidateOnLayoutChange layoutKey={layoutKey} />
       {/* While drawing we don't refetch on every pan — would be confusing. */}
       <ViewportSync onChange={onViewportChange} enabled={!drawingMode} />

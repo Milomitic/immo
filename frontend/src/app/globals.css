@@ -84,8 +84,12 @@ html {
     --attention-bg: rgba(245, 158, 11, 0.15);
 }
 
-/* Dark map: the basemap switches to CARTO Dark Matter (see MapView);
-   here only Leaflet's own chrome follows the theme. */
+/* Dark map: with a CARTO key the basemap switches to Dark Matter (see
+   MapView). Without one it stays on OSM, which only has light tiles: invert
+   them (hue-rotate keeps water blue and parks green). */
+.tiles-dark {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
 .dark .leaflet-container {
   background: #262626;
 }
