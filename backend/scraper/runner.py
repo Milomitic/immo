@@ -8,11 +8,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import sentry_sdk
 import structlog
 
 from app.config import settings
 from app.database import async_session, init_db
 from app.models.scrape_run import ScrapeError, ScrapeRun
+from app.observability import init_sentry
 from app.services.alert_service import send_alert_digest
 from app.services.scrape_service import enabled_portals
 from app.utils.logging import setup_logging
@@ -290,6 +292,7 @@ async def run_spider(
         except Exception as e:
             errors += len(batch)
             error_details.append(f"batch_error: {e}")
+            sentry_sdk.capture_exception(e)  # a pipeline bug, not the site
         finally:
             batch.clear()
             reporter.set_stats(
@@ -310,6 +313,7 @@ async def run_spider(
         spider_crashed = True
         errors += 1
         error_details.append(f"Spider error: {e}")
+        sentry_sdk.capture_exception(e)
         spider.record_error("spider", None, None, f"{type(e).__name__}: {e}")
     finally:
         await spider.close()
@@ -445,6 +449,7 @@ async def run_all_spiders(city: str, listing_type: str) -> None:
 async def main(portal: str | None = None, city: str | None = None) -> None:
     log_path = Path(__file__).resolve().parents[1] / "scraper.log"
     setup_logging(log_file=log_path)
+    init_sentry("scraper")
     await init_db()
 
     target_city = city or settings.SCRAPE_DEFAULT_CITY

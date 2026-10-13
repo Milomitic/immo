@@ -20,6 +20,8 @@ dependencies = [
     "apscheduler>=3.10",
     "structlog",
     "python-dotenv",
+    "prometheus-client>=0.20",
+    "sentry-sdk>=2.0",
 ]
 
 [project.optional-dependencies]

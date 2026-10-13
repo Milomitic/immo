@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     # Where links in e-mails point.
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Observability. /metrics serves Prometheus metrics (catalogue size,
+    # scrape outcomes and errors, API latency); turn it off if the API is
+    # exposed publicly. Unhandled errors of the API and the scraper go to
+    # Sentry when SENTRY_DSN is set.
+    METRICS_ENABLED: bool = True
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
     model_config = SettingsConfigDict(
         env_file=str(_PROJECT_ROOT / ".env"),
         extra="ignore",

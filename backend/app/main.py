@@ -7,10 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.alerts import router as alerts_router
 from app.api.favorites import router as favorites_router
 from app.api.listings import router as listings_router
+from app.api.metrics import router as metrics_router
 from app.api.scrape import router as scrape_router
 from app.api.stats import router as stats_router
 from app.config import settings
 from app.database import init_db
+from app.observability import MetricsMiddleware, init_sentry
 from app.services.scheduler import run_scheduler
 from app.utils.logging import setup_logging
 
@@ -31,6 +33,8 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(scheduler, timeout=5)
 
 
+init_sentry("api")
+
 app = FastAPI(
     title="Immo",
     description="Real estate listing aggregator",
@@ -45,6 +49,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(MetricsMiddleware)
 
 _ROUTERS = (listings_router, favorites_router, alerts_router, scrape_router, stats_router)
 
@@ -54,6 +59,10 @@ _ROUTERS = (listings_router, favorites_router, alerts_router, scrape_router, sta
 for _router in _ROUTERS:
     app.include_router(_router, prefix="/api/v1")
     app.include_router(_router, prefix="/api", include_in_schema=False)
+
+
+# Prometheus convention: /metrics at the root, outside the versioned API.
+app.include_router(metrics_router)
 
 
 @app.get("/health")
