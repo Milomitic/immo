@@ -35,8 +35,8 @@ export function PriceChangeBadge({
 
   const Icon = isReduction ? TrendingDown : TrendingUp;
   const colorClass = isReduction
-    ? "bg-green-100 text-green-800 border-green-300"
-    : "bg-red-100 text-red-700 border-red-300";
+    ? "bg-[var(--positive-bg)] text-[var(--positive)] border-[var(--positive-border)]"
+    : "bg-[var(--negative-bg)] text-[var(--negative)] border-[var(--negative-border)]";
   const sizeClass =
     size === "md"
       ? "text-sm px-2.5 py-1 gap-1.5"

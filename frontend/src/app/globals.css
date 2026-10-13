@@ -1,6 +1,21 @@
 @import "tailwindcss";
 
+/* next-themes toggles a .dark class; without this Tailwind's dark: variant
+   would follow the OS setting instead of the in-app toggle. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  /* Semantic tones (price down / up, attention). Components use these
+     instead of fixed pastel utilities so they also read well in dark mode. */
+  --positive: #15803d;
+  --positive-bg: #dcfce7;
+  --positive-border: #86efac;
+  --negative: #b91c1c;
+  --negative-bg: #fee2e2;
+  --negative-border: #fca5a5;
+  --attention: #92400e;
+  --attention-bg: #fef3c7;
+
   --background: #ffffff;
   --foreground: #1a1a2e;
   --muted: #f4f5f7;
@@ -59,6 +74,33 @@ html {
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 14px;
+    --positive: #4ade80;
+    --positive-bg: rgba(34, 197, 94, 0.15);
+    --positive-border: rgba(74, 222, 128, 0.4);
+    --negative: #f87171;
+    --negative-bg: rgba(239, 68, 68, 0.15);
+    --negative-border: rgba(248, 113, 113, 0.4);
+    --attention: #fbbf24;
+    --attention-bg: rgba(245, 158, 11, 0.15);
+}
+
+/* Dark map: OSM only serves light tiles, so invert them (the hue-rotate
+   keeps water blue and parks green) and theme Leaflet's popups. */
+.dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
+.dark .leaflet-container {
+  background: #1a1a22;
+}
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.dark .leaflet-control-zoom a,
+.dark .leaflet-control-attribution {
+  background: var(--muted);
+  color: var(--foreground);
 }
 
 body {

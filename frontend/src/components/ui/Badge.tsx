@@ -18,9 +18,9 @@ interface BadgeProps {
 const variantStyles: Record<BadgeVariant, string> = {
   default: "bg-[var(--muted)] text-[var(--foreground)]",
   primary: "bg-[var(--primary)] text-[var(--primary-foreground)]",
-  success: "bg-emerald-100 text-emerald-800",
-  warning: "bg-amber-100 text-amber-800",
-  destructive: "bg-red-100 text-red-800",
+  success: "bg-[var(--positive-bg)] text-[var(--positive)]",
+  warning: "bg-[var(--attention-bg)] text-[var(--attention)]",
+  destructive: "bg-[var(--negative-bg)] text-[var(--negative)]",
   outline: "border border-[var(--border)] text-[var(--foreground)] bg-[var(--background)]",
 };
 

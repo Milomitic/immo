@@ -43,7 +43,7 @@ export function SaveSearchButton() {
     return (
       <Link
         href="/alerts"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium text-green-700 border border-green-300 bg-green-50"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium text-[var(--positive)] border border-[var(--positive-border)] bg-[var(--positive-bg)]"
       >
         <Check className="h-4 w-4" /> Salvata · vedi avvisi
       </Link>

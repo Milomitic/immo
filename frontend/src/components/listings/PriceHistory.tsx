@@ -19,7 +19,7 @@ function pct(from: number, to: number): string {
 }
 
 const trendClass = (delta: number) =>
-  delta < 0 ? "text-green-700" : delta > 0 ? "text-red-600" : "text-[var(--muted-foreground)]";
+  delta < 0 ? "text-[var(--positive)]" : delta > 0 ? "text-[var(--negative)]" : "text-[var(--muted-foreground)]";
 
 /** Step line: a price holds until the next observation, then jumps; the
  *  last one holds until today. */

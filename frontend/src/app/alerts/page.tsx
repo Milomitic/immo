@@ -100,7 +100,7 @@ function AlertCard({ alert }: { alert: SearchAlert }) {
           <Link
             href={`/search${toQueryString({ ...base, price_drop_since: since })}`}
             onClick={() => markSeen.mutate(alert.id)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-100 text-green-800 border border-green-300 font-medium hover:bg-green-200"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--positive-bg)] text-[var(--positive)] border border-[var(--positive-border)] font-medium hover:opacity-80"
           >
             <TrendingDown className="h-3.5 w-3.5" /> {alert.price_drop_count} ribassi
           </Link>
