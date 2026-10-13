@@ -406,8 +406,11 @@ class ImmobiliareSpider(BaseSpider):
                     img_url = img_url.replace("/xxs-c.", "/m-c.")
                     images.append(img_url)
 
-            # Title
-            title = main_prop.get("caption", "") or re_data.get("title", "")
+            # Title: the portal's own ("Trilocale via Roma 9, Murat, Bari"),
+            # built from the property's data. The agency's free "caption"
+            # is only a fallback: some agencies put a recruiting line with
+            # an e-mail address there, or one slogan on all their ads.
+            title = re_data.get("title", "") or main_prop.get("caption", "")
             if not title:
                 title = f"Appartamento in {'vendita' if params.listing_type == 'sale' else 'affitto'} a {city}"
 

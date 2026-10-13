@@ -440,3 +440,30 @@ def test_immobiliare_structured_auction_flag():
     data = {"results": [_immobiliare_result(1, "auction"), _immobiliare_result(2, "sale")]}
     items = _spider(ImmobiliareSpider)._extract_items(data, SearchParams())
     assert {i.source_id: i.is_auction for i in items} == {"1": True, "2": False}
+
+
+def _immobiliare_titled(title: str | None, caption: str | None) -> dict:
+    result = _immobiliare_result(3, "sale")
+    real_estate = result["realEstate"]
+    real_estate.pop("title")
+    real_estate["properties"][0].pop("caption")
+    if title is not None:
+        real_estate["title"] = title
+    if caption is not None:
+        real_estate["properties"][0]["caption"] = caption
+    return result
+
+
+@pytest.mark.parametrize("title, caption, expected", [
+    # The portal's own title describes the property; the agency's free
+    # caption can be anything — a recruiting line, a slogan.
+    ("Trilocale via Postiglione, Carbonara di Bari, Bari",
+     "Lavora in A.P.I. Srl -Curriculum studio@apisrl.org",
+     "Trilocale via Postiglione, Carbonara di Bari, Bari"),
+    (None, "4 Vani con posto auto e cortile", "4 Vani con posto auto e cortile"),
+    (None, None, "Appartamento in vendita a Bari"),
+])
+def test_immobiliare_title_prefers_the_portals_own(title, caption, expected):
+    data = {"results": [_immobiliare_titled(title, caption)]}
+    [item] = _spider(ImmobiliareSpider)._extract_items(data, SearchParams())
+    assert item.title == expected
