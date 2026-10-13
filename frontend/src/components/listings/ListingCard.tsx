@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
+import { MapPin, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
+import { formatPrice, portalLabel, portalColor, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
+import { AmenityIcons, KeyFacts } from "@/components/listings/ListingFeatures";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PublishedAt } from "@/components/listings/PublishedAt";
 
@@ -112,28 +113,11 @@ export function ListingCard({ listing, onCompareToggle, isCompareSelected }: Lis
           </span>
         </div>
 
-        {/* Info bar */}
-        <div className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] py-2.5 border-t border-[var(--border)]">
-          {listing.rooms && (
-            <span className="flex items-center gap-1 pr-2.5 border-r border-[var(--border)]">
-              <BedDouble className="h-3.5 w-3.5" /> {listing.rooms}
-            </span>
-          )}
-          {listing.area_sqm && (
-            <span className="flex items-center gap-1 px-2.5 border-r border-[var(--border)]">
-              <Maximize2 className="h-3.5 w-3.5" /> {formatArea(listing.area_sqm)}
-            </span>
-          )}
-          {listing.bathrooms && (
-            <span className="flex items-center gap-1 px-2.5 border-r border-[var(--border)]">
-              <Bath className="h-3.5 w-3.5" /> {listing.bathrooms}
-            </span>
-          )}
-          {listing.floor && (
-            <span className="flex items-center gap-1 pl-2.5">
-              <Building2 className="h-3.5 w-3.5" /> {floorLabel(listing.floor)}
-            </span>
-          )}
+        {/* Info bar: key facts, amenities on the right (wrapping below
+            when the card is narrow). */}
+        <div className="flex flex-wrap items-center gap-y-1.5 text-xs text-[var(--muted-foreground)] py-2.5 border-t border-[var(--border)]">
+          <KeyFacts listing={listing} />
+          <AmenityIcons listing={listing} className="ml-auto pl-2.5" />
         </div>
 
         {/* Footer */}

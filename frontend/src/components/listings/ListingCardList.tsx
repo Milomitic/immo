@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
+import { MapPin, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, floorLabel, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
+import { formatPrice, portalLabel, portalColor, isNewListing, roomsLabel, imageVariant } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PublishedAt } from "@/components/listings/PublishedAt";
+import { AmenityIcons, KeyFacts } from "@/components/listings/ListingFeatures";
 
 interface ListingCardListProps {
   listing: Listing;
@@ -96,27 +97,9 @@ export function ListingCardList({ listing, onCompareToggle, isCompareSelected }:
         </div>
 
         {/* Info bar */}
-        <div className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] mb-3">
-          {listing.rooms && (
-            <span className="flex items-center gap-1 pr-2.5 border-r border-[var(--border)]">
-              <BedDouble className="h-3.5 w-3.5" /> {listing.rooms} locali
-            </span>
-          )}
-          {listing.area_sqm && (
-            <span className="flex items-center gap-1 px-2.5 border-r border-[var(--border)]">
-              <Maximize2 className="h-3.5 w-3.5" /> {formatArea(listing.area_sqm)}
-            </span>
-          )}
-          {listing.bathrooms && (
-            <span className="flex items-center gap-1 px-2.5 border-r border-[var(--border)]">
-              <Bath className="h-3.5 w-3.5" /> {listing.bathrooms} bagni
-            </span>
-          )}
-          {listing.floor && (
-            <span className="flex items-center gap-1 pl-2.5">
-              <Building2 className="h-3.5 w-3.5" /> {floorLabel(listing.floor)}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-y-1.5 text-xs text-[var(--muted-foreground)] mb-3">
+          <KeyFacts listing={listing} verbose />
+          <AmenityIcons listing={listing} className="ml-4" />
         </div>
 
         {/* Description preview */}

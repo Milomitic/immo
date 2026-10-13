@@ -3,9 +3,8 @@
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  MapPin, Maximize2, BedDouble, Bath, Building2,
-  Layers, ExternalLink, ChevronLeft, ChevronRight, Car, Trees,
-  Fence, Home, Expand, Map as MapIcon, Clock,
+  MapPin, Layers, ExternalLink, ChevronLeft, ChevronRight,
+  Home, Expand, Map as MapIcon, Clock,
 } from "lucide-react";
 import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
 import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo, imageVariant } from "@/lib/utils";
@@ -16,6 +15,7 @@ import { PublishedAt } from "@/components/listings/PublishedAt";
 import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
+import { FACT_ICONS, presentAmenities } from "@/components/listings/featureIcons";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 
@@ -258,13 +258,13 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
               <h2 className="text-base font-bold mb-3">Caratteristiche principali</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { icon: Maximize2, label: "Superficie", value: listing.area_sqm ? formatArea(listing.area_sqm) : null },
-                  { icon: BedDouble, label: "Locali", value: listing.rooms ? `${listing.rooms}` : null },
-                  { icon: Bath, label: "Bagni", value: listing.bathrooms ? `${listing.bathrooms}` : null },
-                  { icon: Building2, label: "Piano", value: listing.floor ? floorLabel(listing.floor) : null },
+                  { icon: FACT_ICONS.area, label: "Superficie", value: listing.area_sqm ? formatArea(listing.area_sqm) : null },
+                  { icon: FACT_ICONS.rooms, label: "Locali", value: listing.rooms ? `${listing.rooms}` : null },
+                  { icon: FACT_ICONS.bathrooms, label: "Bagni", value: listing.bathrooms ? `${listing.bathrooms}` : null },
+                  { icon: FACT_ICONS.floor, label: "Piano", value: listing.floor ? floorLabel(listing.floor) : null },
                 ].filter(f => f.value).map(({ icon: Icon, label, value }) => (
                   <div key={label} className="rounded-[var(--radius-md)] border border-[var(--border)] p-3 text-center">
-                    <Icon className="h-5 w-5 mx-auto mb-1 text-[var(--primary)]" />
+                    <Icon className="h-5 w-5 mx-auto mb-1 text-[var(--primary)]" aria-hidden />
                     <div className="text-base font-bold">{value}</div>
                     <div className="text-[11px] text-[var(--muted-foreground)]">{label}</div>
                   </div>
@@ -273,19 +273,13 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             </div>
 
             {/* Features */}
-            {[listing.has_elevator, listing.has_balcony, listing.has_terrace, listing.has_garage, listing.has_garden].some(Boolean) && (
+            {presentAmenities(listing).length > 0 && (
               <div>
                 <h2 className="text-base font-bold mb-3">Dotazioni</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    { value: listing.has_elevator, label: "Ascensore", icon: Building2 },
-                    { value: listing.has_balcony, label: "Balcone", icon: Fence },
-                    { value: listing.has_terrace, label: "Terrazzo", icon: Fence },
-                    { value: listing.has_garage, label: "Garage / Box", icon: Car },
-                    { value: listing.has_garden, label: "Giardino", icon: Trees },
-                  ].filter(f => f.value).map(({ label, icon: Icon }) => (
-                    <div key={label} className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--primary-light)] text-sm font-medium">
-                      <Icon className="h-4 w-4 text-[var(--primary)]" /> {label}
+                  {presentAmenities(listing).map(({ key, label, icon: Icon }) => (
+                    <div key={key} className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--primary-light)] text-sm font-medium">
+                      <Icon className="h-4 w-4 text-[var(--primary)]" aria-hidden /> {label}
                     </div>
                   ))}
                 </div>
@@ -341,11 +335,22 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             <div className="rounded-[var(--radius-lg)] border border-[var(--border)] p-5" style={{ boxShadow: "var(--card-shadow)" }}>
               <h3 className="font-bold mb-3">Dettagli</h3>
               <dl className="space-y-2.5 text-sm">
-                {listing.heating && <div className="flex justify-between"><dt className="text-[var(--muted-foreground)]">Riscaldamento</dt><dd className="font-medium">{listing.heating}</dd></div>}
-                {listing.condition && <div className="flex justify-between"><dt className="text-[var(--muted-foreground)]">Stato</dt><dd className="font-medium">{conditionLabel(listing.condition)}</dd></div>}
-                {listing.condominium_fees && <div className="flex justify-between"><dt className="text-[var(--muted-foreground)]">Spese condominiali</dt><dd className="font-medium">{formatPrice(listing.condominium_fees)}/mese</dd></div>}
-                {listing.year_built && <div className="flex justify-between"><dt className="text-[var(--muted-foreground)]">Anno</dt><dd className="font-medium">{listing.year_built}</dd></div>}
-                {listing.total_floors && <div className="flex justify-between"><dt className="text-[var(--muted-foreground)]">Piani totali</dt><dd className="font-medium">{listing.total_floors}</dd></div>}
+                {([
+                  [FACT_ICONS.bedrooms, "Camere da letto", listing.bedrooms ? `${listing.bedrooms}` : null],
+                  [FACT_ICONS.heating, "Riscaldamento", listing.heating],
+                  [FACT_ICONS.condition, "Stato", listing.condition ? conditionLabel(listing.condition) : null],
+                  [FACT_ICONS.condominiumFees, "Spese condominiali", listing.condominium_fees ? `${formatPrice(listing.condominium_fees)}/mese` : null],
+                  [FACT_ICONS.yearBuilt, "Anno", listing.year_built ? `${listing.year_built}` : null],
+                  [FACT_ICONS.totalFloors, "Piani totali", listing.total_floors ? `${listing.total_floors}` : null],
+                ] as const).filter(([, , value]) => value).map(([Icon, label, value]) => (
+                  <div key={label} className="flex justify-between gap-3">
+                    <dt className="flex items-center gap-1.5 text-[var(--muted-foreground)]">
+                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {label}
+                    </dt>
+                    <dd className="font-medium text-right">{value}</dd>
+                  </div>
+                ))}
               </dl>
             </div>
 

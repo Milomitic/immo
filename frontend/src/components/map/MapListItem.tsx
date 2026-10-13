@@ -16,6 +16,8 @@ import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { FavoriteButton } from "@/components/listings/FavoriteButton";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 import { PublishedAt } from "@/components/listings/PublishedAt";
+import { KeyFacts } from "@/components/listings/ListingFeatures";
+import { FACT_ICONS, presentAmenities } from "@/components/listings/featureIcons";
 
 export type MapListItemMode = "normal" | "compact" | "expanded";
 
@@ -134,9 +136,12 @@ export function MapListItem({ marker: m, mode, highlighted, onToggle, onHover }:
               {m.zone ? `${m.zone}, ` : ""}
               <span className="capitalize">{m.city}</span>
             </div>
-            {/* Bottom line: size on the left, publication age bottom-right. */}
+            {/* Bottom line: rooms and size on the left, publication age
+                bottom-right. */}
             <div className="flex items-end justify-between gap-2 mt-auto pt-0.5">
-              <span className="text-xs text-[var(--muted-foreground)]">{m.area_sqm ? formatArea(m.area_sqm) : ""}</span>
+              <span className="flex items-center text-xs text-[var(--muted-foreground)]">
+                <KeyFacts listing={m} />
+              </span>
               <PostedAt date={m.publication_date} />
             </div>
           </div>
@@ -196,26 +201,19 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
   const isPlan = current >= photos.length;
 
   const facts = listing
-    ? [
-        ["Superficie", listing.area_sqm ? formatArea(listing.area_sqm) : null],
-        ["Locali", listing.rooms ? `${listing.rooms}` : null],
-        ["Bagni", listing.bathrooms ? `${listing.bathrooms}` : null],
-        ["Piano", listing.floor ? floorLabel(listing.floor) : null],
-        ["€/m²", listing.price_per_sqm ? formatPrice(listing.price_per_sqm) : null],
-        ["Stato", listing.condition ? conditionLabel(listing.condition) : null],
-        ["Anno", listing.year_built ? `${listing.year_built}` : null],
-        ["Spese cond.", listing.condominium_fees ? `${formatPrice(listing.condominium_fees)}/mese` : null],
-      ].filter((f): f is [string, string] => Boolean(f[1]))
-    : [];
-  const features = listing
     ? ([
-        ["Ascensore", listing.has_elevator],
-        ["Balcone", listing.has_balcony],
-        ["Terrazzo", listing.has_terrace],
-        ["Garage / box", listing.has_garage],
-        ["Giardino", listing.has_garden],
-      ] as const).filter(([, v]) => v === true).map(([label]) => label)
+        ["Superficie", FACT_ICONS.area, listing.area_sqm ? formatArea(listing.area_sqm) : null],
+        ["Locali", FACT_ICONS.rooms, listing.rooms ? `${listing.rooms}` : null],
+        ["Bagni", FACT_ICONS.bathrooms, listing.bathrooms ? `${listing.bathrooms}` : null],
+        ["Piano", FACT_ICONS.floor, listing.floor ? floorLabel(listing.floor) : null],
+        ["€/m²", FACT_ICONS.pricePerSqm, listing.price_per_sqm ? formatPrice(listing.price_per_sqm) : null],
+        ["Stato", FACT_ICONS.condition, listing.condition ? conditionLabel(listing.condition) : null],
+        ["Anno", FACT_ICONS.yearBuilt, listing.year_built ? `${listing.year_built}` : null],
+        ["Spese cond.", FACT_ICONS.condominiumFees, listing.condominium_fees ? `${formatPrice(listing.condominium_fees)}/mese` : null],
+      ] as const).filter((f) => Boolean(f[2]))
     : [];
+  const features = listing ? presentAmenities(listing) : [];
+  const EnergyIcon = FACT_ICONS.energyClass;
 
   return (
     <div className="px-3 pb-2">
@@ -292,15 +290,21 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
 
               {facts.length > 0 && (
                 <dl className="grid grid-cols-3 gap-2">
-                  {facts.map(([label, value]) => (
+                  {facts.map(([label, Icon, value]) => (
                     <div key={label} className="rounded-[var(--radius-sm)] bg-[var(--muted)] px-2 py-1.5">
-                      <dt className="text-[10px] text-[var(--muted-foreground)]">{label}</dt>
+                      <dt className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                        <Icon className="h-3 w-3 shrink-0" aria-hidden />
+                        {label}
+                      </dt>
                       <dd className="text-xs font-semibold">{value}</dd>
                     </div>
                   ))}
                   {listing.energy_class && (
                     <div className="rounded-[var(--radius-sm)] bg-[var(--muted)] px-2 py-1.5">
-                      <dt className="text-[10px] text-[var(--muted-foreground)]">Classe</dt>
+                      <dt className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                        <EnergyIcon className="h-3 w-3 shrink-0" aria-hidden />
+                        Classe
+                      </dt>
                       <dd>
                         <span className={cn("text-xs font-bold px-1.5 rounded", energyClassColor(listing.energy_class))}>
                           {listing.energy_class}
@@ -313,8 +317,11 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
 
               {features.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {features.map((f) => (
-                    <span key={f} className="px-2 py-0.5 rounded-full border border-[var(--border)] text-[11px]">{f}</span>
+                  {features.map(({ key, label, icon: Icon }) => (
+                    <span key={key} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-[var(--border)] text-[11px]">
+                      <Icon className="h-3 w-3 text-[var(--primary)]" aria-hidden />
+                      {label}
+                    </span>
                   ))}
                 </div>
               )}

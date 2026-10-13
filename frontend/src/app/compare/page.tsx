@@ -6,7 +6,8 @@ import { useQueries } from "@tanstack/react-query";
 import { fetchListing } from "@/lib/api";
 import type { ListingDetail } from "@/lib/types";
 import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, floorLabel, conditionLabel, energyClassColor, imageVariant } from "@/lib/utils";
-import { ArrowLeft, CheckCircle2, XCircle, Minus, Search } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, Minus, Search, type LucideIcon } from "lucide-react";
+import { AMENITIES, FACT_ICONS } from "@/components/listings/featureIcons";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 
@@ -66,24 +67,24 @@ function CompareContent() {
     return <Minus className="h-4 w-4 text-[var(--muted-foreground)] mx-auto" />;
   };
 
-  const rows: { label: string; render: (l: ListingDetail) => ReactNode }[] = [
+  const rows: { label: string; icon?: LucideIcon; render: (l: ListingDetail) => ReactNode }[] = [
     { label: "Prezzo", render: (l) => <span className="font-bold text-[var(--primary)]">{formatPrice(l.price)}</span> },
-    { label: "Prezzo/m\u00B2", render: (l) => l.price_per_sqm ? formatPrice(l.price_per_sqm) : "N/D" },
-    { label: "Superficie", render: (l) => l.area_sqm ? formatArea(l.area_sqm) : "N/D" },
-    { label: "Locali", render: (l) => l.rooms ?? "N/D" },
-    { label: "Bagni", render: (l) => l.bathrooms ?? "N/D" },
-    { label: "Piano", render: (l) => l.floor ? floorLabel(l.floor) : "N/D" },
-    { label: "Tipologia", render: (l) => propertyTypeLabel(l.property_type) },
-    { label: "Classe energetica", render: (l) => l.energy_class ? <Badge size="sm" className={energyClassColor(l.energy_class)}>Classe {l.energy_class}</Badge> : "N/D" },
-    { label: "Stato", render: (l) => l.condition ? conditionLabel(l.condition) : "N/D" },
+    { label: "Prezzo/m\u00B2", icon: FACT_ICONS.pricePerSqm, render: (l) => l.price_per_sqm ? formatPrice(l.price_per_sqm) : "N/D" },
+    { label: "Superficie", icon: FACT_ICONS.area, render: (l) => l.area_sqm ? formatArea(l.area_sqm) : "N/D" },
+    { label: "Locali", icon: FACT_ICONS.rooms, render: (l) => l.rooms ?? "N/D" },
+    { label: "Bagni", icon: FACT_ICONS.bathrooms, render: (l) => l.bathrooms ?? "N/D" },
+    { label: "Piano", icon: FACT_ICONS.floor, render: (l) => l.floor ? floorLabel(l.floor) : "N/D" },
+    { label: "Tipologia", icon: FACT_ICONS.propertyType, render: (l) => propertyTypeLabel(l.property_type) },
+    { label: "Classe energetica", icon: FACT_ICONS.energyClass, render: (l) => l.energy_class ? <Badge size="sm" className={energyClassColor(l.energy_class)}>Classe {l.energy_class}</Badge> : "N/D" },
+    { label: "Stato", icon: FACT_ICONS.condition, render: (l) => l.condition ? conditionLabel(l.condition) : "N/D" },
     { label: "Citta", render: (l) => <span className="capitalize">{l.city}</span> },
     { label: "Portale", render: (l) => <Badge size="sm" className={`${portalColor(l.source_portal)} text-white`}>{portalLabel(l.source_portal)}</Badge> },
     { label: "Fonti", render: (l) => l.source_count },
-    { label: "Ascensore", render: (l) => <BoolIcon value={l.has_elevator} /> },
-    { label: "Balcone", render: (l) => <BoolIcon value={l.has_balcony} /> },
-    { label: "Terrazzo", render: (l) => <BoolIcon value={l.has_terrace} /> },
-    { label: "Garage", render: (l) => <BoolIcon value={l.has_garage} /> },
-    { label: "Giardino", render: (l) => <BoolIcon value={l.has_garden} /> },
+    ...AMENITIES.map(({ key, label, icon }) => ({
+      label,
+      icon,
+      render: (l: ListingDetail) => <BoolIcon value={l[key]} />,
+    })),
   ];
 
   return (
@@ -114,9 +115,15 @@ function CompareContent() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ label, render }, i) => (
+            {rows.map(({ label, icon: Icon, render }, i) => (
               <tr key={label} className={i % 2 === 0 ? "" : "bg-[var(--muted)]/50"}>
-                <td className="p-3 text-sm font-medium text-[var(--muted-foreground)] border-r border-[var(--border)]">{label}</td>
+                <td className="p-3 text-sm font-medium text-[var(--muted-foreground)] border-r border-[var(--border)]">
+                  <span className="flex items-center gap-1.5">
+                    {/* Placeholder keeps the labels aligned on rows without one. */}
+                    {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <span className="w-3.5 shrink-0" />}
+                    {label}
+                  </span>
+                </td>
                 {listings.map((listing) => (
                   <td key={listing!.id} className="p-3 text-sm">{render(listing)}</td>
                 ))}
