@@ -126,6 +126,55 @@ async def test_casa_flags_fall_back_to_description():
     assert item.has_elevator is False
 
 
+CASA_JSONLD = {
+    "@type": "Apartment",
+    "name": "Bilocale",
+    "description": "Bilocale con balcone e posto auto.",
+    "offers": [{"price": "239000"}],
+    "floorSize": {"value": "70"},
+    "address": {"streetAddress": "Corso Cavour 5", "addressLocality": "Bari"},
+    "geo": {"latitude": "41.12", "longitude": "16.87"},
+    "datePosted": "2026-03-02",
+}
+
+
+async def test_casa_falls_back_to_jsonld_without_next_data():
+    html = (
+        "<html><body>"
+        f'<script type="application/ld+json">{json.dumps(CASA_JSONLD)}</script>'
+        "</body></html>"
+    )
+    item = await _spider(CasaSpider).parse_listing("https://www.casa.it/affitto/immobili/9/", html)
+    assert (item.title, item.price, item.area_sqm) == ("Bilocale", 239000.0, 70.0)
+    assert (item.city, item.address, item.lat, item.lng) == ("bari", "Corso Cavour 5", 41.12, 16.87)
+    assert item.publication_date == "2026-03-02"
+    assert (item.has_balcony, item.has_garage) == (True, True)  # from the description
+    assert item.listing_type == "rent"  # no pdp channel → the URL decides
+
+
+async def test_casa_falls_back_to_page_markup():
+    html = """<html><head><meta property="og:image" content="https://img.casa.it/og.jpg"></head><body>
+        <h1>Villa in vendita in Viale Japigia, 12 a Monopoli</h1>
+        <div class="csaPrice">€ 350.000 tua da 1.200 al mese</div>
+        <ul class="info"><li>120 mq</li><li>5 locali</li><li>2 bagni</li></ul>
+        <dl><dt>Piano</dt><dd>3 su 6</dd><dt>Classe energetica</dt><dd>a3</dd></dl>
+        </body></html>"""
+    item = await _spider(CasaSpider).parse_listing("https://www.casa.it/immobili/4/", html)
+    assert item.price == 350000.0  # not the mortgage instalment
+    assert (item.area_sqm, item.rooms, item.bathrooms) == (120.0, 5, 2)
+    assert (item.floor, item.total_floors) == ("3 su 6", 6)
+    assert item.energy_class == "A3"
+    assert (item.city, item.address) == ("monopoli", "Viale Japigia")
+    assert item.images == ["https://img.casa.it/og.jpg"]
+
+
+@pytest.mark.parametrize("raw", ["n.d.", "Esente", "In attesa di certificazione"])
+async def test_casa_energy_class_placeholders_are_unknown(raw):
+    html = casa_page(CASA_PDP, body=f"<dl><dt>Classe energetica</dt><dd>{raw}</dd></dl>")
+    item = await _spider(CasaSpider).parse_listing("https://www.casa.it/immobili/1/", html)
+    assert item.energy_class is None
+
+
 async def test_casa_total_pages_from_result_count():
     # Real page count, uncapped: the run applies max_pages and flags the
     # truncation, so coverage can be reported honestly.

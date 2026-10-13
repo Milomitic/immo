@@ -430,7 +430,8 @@ class ImmobiliareSpider(BaseSpider):
             # Energy class from description
             energy_class = None
             if description:
-                ec_match = re.search(r"classe\s+energetica\s*[:\s]*([A-G]\d?)", description, re.IGNORECASE)
+                # (?!…): "classe energetica esente" is no class E
+                ec_match = re.search(r"classe\s+energetica\s*[:\s]*([A-G]\d?)(?![a-z])", description, re.IGNORECASE)
                 if ec_match:
                     energy_class = ec_match.group(1).upper()
 
