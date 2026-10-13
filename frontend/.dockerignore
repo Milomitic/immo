@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+# Local keys stay out of the image; pass NEXT_PUBLIC_* as build args.
+.env*
+!.env.local.example
+Dockerfile
+.dockerignore

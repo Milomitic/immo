@@ -1,3 +1,9 @@
+# Production-like stack: built images, no source mounts, no reload.
+# For development run the two servers directly (make backend / make frontend).
+#
+# Settings come from ./.env (see .env.example). NEXT_PUBLIC_* values are
+# baked into the frontend at build time: after changing them, rebuild with
+# `docker compose build frontend`.
 services:
   backend:
     build: ./backend
@@ -5,41 +11,29 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ./backend:/app
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/immo.db
-      - CORS_ORIGINS=["http://localhost:3000"]
-      - LOG_LEVEL=INFO
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      DATABASE_URL: sqlite+aiosqlite:///./data/immo.db
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_ADMIN_TOKEN: ${NEXT_PUBLIC_ADMIN_TOKEN:-}
+        NEXT_PUBLIC_CARTO_API_KEY: ${NEXT_PUBLIC_CARTO_API_KEY:-}
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    command: npm run dev
     depends_on:
-      - backend
-
-  scraper:
-    build: ./backend
-    volumes:
-      - ./data:/app/data
-      - ./backend:/app
-    environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/immo.db
-      - SCRAPE_INTERVAL_HOURS=6
-      - SCRAPE_DEFAULT_CITY=milano
-    command: python -m scraper.runner
-    depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

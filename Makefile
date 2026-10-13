@@ -1,42 +1,31 @@
-.PHONY: dev up down build logs scrape test lint
+.PHONY: up down build logs backend frontend scrape test test-cov lint format db-migrate db-revision
 
-# Docker commands
+# Docker (production-like stack: see docker-compose.yml)
 up:
-	docker-compose up -d
+	docker compose up -d --build
 
 down:
-	docker-compose down
+	docker compose down
 
 build:
-	docker-compose build
+	docker compose build
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
-# Development
-dev:
-	docker-compose up
-
-# Backend only
+# Development: run each in its own terminal
 backend:
 	cd backend && uvicorn app.main:app --reload --port 8000
 
-# Frontend only
 frontend:
 	cd frontend && npm run dev
 
-# Scraping
+# Scraping (default city from SCRAPE_DEFAULT_CITY, i.e. Bari)
 scrape:
 	cd backend && python -m scraper.runner
 
-scrape-immobiliare:
-	cd backend && python -m scraper.runner --portal immobiliare
-
-scrape-idealista:
-	cd backend && python -m scraper.runner --portal idealista
-
-scrape-casa:
-	cd backend && python -m scraper.runner --portal casa
+scrape-%:
+	cd backend && python -m scraper.runner --portal $*
 
 # Testing
 test:
@@ -48,11 +37,12 @@ test-cov:
 # Linting
 lint:
 	cd backend && ruff check .
+	cd frontend && npm run lint && npm run typecheck
 
 format:
 	cd backend && ruff format .
 
-# Database
+# Database (migrations also run automatically at startup)
 db-migrate:
 	cd backend && alembic upgrade head
 

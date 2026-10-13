@@ -1,9 +1,9 @@
 # Immo — Aggregatore Annunci Immobiliari
 
 Web app full-stack che aggrega, deduplica e confronta annunci immobiliari da
-**6 portali** italiani, con vista lista, mappa interattiva con disegno del
-perimetro di ricerca, tracciamento delle variazioni di prezzo e scansione
-one-click dalla homepage.
+**6 portali** italiani: ricerca full-text con filtri, mappa in stile portale
+con anteprima rapida e disegno del perimetro, storico prezzi, aste,
+preferiti, ricerche salvate con avvisi e scansione one-click dalla homepage.
 
 ## Funzionalità
 
@@ -13,77 +13,91 @@ Scraping da **Immobiliare.it**, **Casa.it**, **Tecnocasa**, **RE/MAX**,
 (DataDome blocca tutto). Ogni annuncio nuovo viene deduplicato cross-portale
 (indirizzo, prezzo, superficie, coordinate, stanze) e il portale con priorità
 più alta diventa canonical; gli altri restano attaccati come `listing_sources`.
+Gli annunci spariti da un portale vengono disattivati solo se l'ultima
+scansione di quel portale ha visto **tutto** il catalogo della città (vedi
+[Copertura](#scraping--copertura-e-disattivazione)).
 
-### Snapshot immutabile + tracciamento prezzi
-Il primo scraping registra il "fatto storico" dell'annuncio; run successivi
+### Snapshot immutabile + storico prezzi
+Il primo scraping registra il "fatto storico" dell'annuncio; i run successivi
 saltano il detail-fetch per gli ID già in DB (nessuna sovrascrittura di
 titolo/descrizione/foto) ma leggono comunque il prezzo dalle pagine di ricerca
-per rilevare variazioni. Se il prezzo cambia, `price_previous` e
-`price_changed_at` vengono aggiornati e la UI mostra badge ↓ verde
-(riduzione) o ↑ rosso (aumento) sulle card.
+per rilevare variazioni. Ogni variazione finisce in `listing_price_history`:
+le card mostrano il badge ↓ verde / ↑ rosso, il dettaglio il grafico dello
+storico.
 
-### Vista lista con filtri completi
-`/search` — 10+ categorie di filtri collassabili (tipo, dove, tipologia,
-prezzo, superficie, locali, bagni, piano, caratteristiche, classe energetica,
-stato, fonte), toggle grid/list, sort esteso (data, prezzo, €/m², superficie),
-selettore page-size 20/50/100, chip di filtri attivi rimovibili singolarmente.
+### Ricerca
+`/search` — ricerca **full-text** (SQLite FTS5 con prefissi italiani:
+"terrazz" trova terrazzo/terrazzi/terrazza), 10+ categorie di filtri
+collassabili (tipo, dove, tipologia, prezzo, superficie, locali, bagni, piano,
+caratteristiche, classe energetica, stato, fonte, **data di pubblicazione**,
+**aste**), toggle grid/list, sort esteso, page-size 20/50/100, chip dei filtri
+attivi rimovibili singolarmente. Ogni caratteristica (locali, superficie,
+bagni, piano, ascensore, terrazzo, box…) ha la sua icona, uguale in tutta l'app.
 
-### Mappa interattiva con disegno perimetro
-`/map` — Leaflet + OSM in split-pane (lista scrollabile a sinistra, mappa a
-destra). Pin custom con prezzo abbreviato. **Disegna area** un perimetro
-cliccando i vertici → il backend filtra con point-in-polygon (ray-casting).
-Il perimetro è serializzato in URL, condivisibile, e attivo anche dalla
-vista lista con banner + chip di rimozione.
+### Mappa
+`/map` — mappa **CARTO Voyager** in stile portale (OpenStreetMap se manca la
+chiave, versione scura in dark mode), pin a pillola col prezzo, **cluster**
+dei pin vicini, aste in arancione. A sinistra l'elenco: ogni riga mostra
+portale, aste e da quanto è pubblicato; **cliccandola si apre un'anteprima**
+(foto, dati principali, dotazioni, descrizione) ridimensionabile, con il link
+alla scheda completa. I filtri si aprono in una sotto-barra chiudibile.
+**Disegna area**: un perimetro cliccando i vertici → il backend filtra con
+point-in-polygon; il perimetro è in URL, condivisibile, attivo anche in lista.
 
-### Scansione one-click con toast persistente
-Bottone "Aggiorna annunci" in homepage lancia lo scraper come processo
-detached (sopravvive ai riavvii del backend). Il toast in basso a destra
-mostra fase corrente (Ricerca → Elaborazione → OK), progress bar
-aggregata cross-portale, ETA calcolato client-side, pill per-portale con
-% individuale, warning se un worker si blocca >120s.
+### Aste
+Gli annunci all'asta sono riconosciuti (dato strutturato su Immobiliare.it,
+analisi del testo sugli altri portali: "asta giudiziaria", "base d'asta",
+"vendita senza incanto"…), segnalati con un'etichetta e filtrabili
+(tutte / solo aste / escludi aste).
 
-### Dettaglio annuncio
-`/listing/[id]` — Galleria con planimetrie in primo piano (badge dedicato,
-mini-marker "Plan" sui thumbnail), lightbox zoom, prezzo con badge di
-variazione, mappa embed, elenco delle fonti dei portali, annunci simili.
+### Preferiti e ricerche salvate
+Il cuore su card e dettaglio salva l'annuncio in `/favorites`. Una ricerca si
+salva dalla lista; `/alerts` mostra per ognuna **cosa c'è di nuovo** dall'ultima
+visita (annunci nuovi e ribassi). Opzionale: un'e-mail di riepilogo dopo ogni
+scansione (SMTP).
 
-### Confronto
-`/compare?ids=a,b,c` — Tabella side-by-side fino a 3 annunci selezionati
-via checkbox dalle card della vista lista.
+### Scansione one-click
+Il bottone "Aggiorna annunci" in homepage (con accanto la data dell'ultimo
+aggiornamento) lancia lo scraper come processo detached, che sopravvive ai
+riavvii del backend. Un toast persistente mostra fase, progress bar, ETA e
+avanzamento per portale; su telefono occupa la larghezza ed è ridotto a una
+riga. Scansioni periodiche automatiche: opt-in (`SCRAPE_SCHEDULE_ENABLED`).
+
+### Dettaglio e confronto
+`/listing/[id]` — galleria con planimetrie, lightbox accessibile, prezzo con
+variazione e storico, dati con icone, mappa, fonti, annunci simili.
+`/compare?ids=a,b,c` — tabella side-by-side fino a 3 annunci.
 
 ## Stack
 
-**Backend**: Python 3.12 · FastAPI · SQLAlchemy 2.0 async · SQLite (WAL) ·
-`curl_cffi` (Chrome TLS impersonation) · BeautifulSoup4 · lxml.
+**Backend**: Python 3.12 · FastAPI · SQLAlchemy 2.0 async · SQLite (WAL, FTS5)
+· Alembic · `curl_cffi` (Chrome TLS impersonation) · BeautifulSoup4 · lxml ·
+prometheus-client · sentry-sdk (opzionale).
 
 **Frontend**: Next.js 15 (Turbopack) · React 19 · TypeScript · Tailwind 4 ·
-React Query · **nuqs** (URL state) · **Leaflet + react-leaflet** · lucide-react
-· next-themes.
+React Query · **nuqs** (URL state) · **Leaflet + react-leaflet** + supercluster
+· lucide-react · next-themes.
 
-**Storage**: SQLite in `data/immo.db` (WAL mode per letture concorrenti). Path
-migratorio a PostgreSQL previsto via SQLAlchemy — nessun raw SQL SQLite-only
-tranne un `PRAGMA` e alcuni CAST in `_apply_listing_filters` per il floor.
+**Storage**: SQLite in `data/immo.db`. Lo schema è gestito da **Alembic**: le
+migrazioni girano da sole all'avvio, precedute da un backup automatico in
+`data/backups/` (ultimi 5).
 
 ## Quick start
 
 ### 1. Configurazione
 
 ```powershell
-cd C:\Users\giuli\Documents\Progetti\immo
 cp .env.example .env
+cp frontend\.env.local.example frontend\.env.local
 ```
 
-Il `.env` alla root controlla il backend (portali abilitati, città default,
-rate-limit). Il default della città è `bari` — cambialo se scrappi altre città.
-
-Per il frontend, opzionalmente crea `frontend/.env.local`:
-
-```
-NEXT_PUBLIC_API_URL=http://localhost:8001
-```
-
-(Necessario solo se il backend non è sulla porta 8000. Usiamo 8001 in dev per
-evitare conflitti con altri progetti locali.)
+- `.env` (root) controlla il backend: portali abilitati, città di default
+  (`bari`), rate-limit, avvisi e-mail, osservabilità. Vedi
+  [Configurazione](#configurazione).
+- `frontend/.env.local`: `NEXT_PUBLIC_API_URL` (il backend) e
+  `NEXT_PUBLIC_CARTO_API_KEY`, la chiave gratuita delle mappe CARTO
+  ([carto.com/basemaps/apikey](https://carto.com/basemaps/apikey)). Senza
+  chiave la mappa usa OpenStreetMap.
 
 ### 2. Installazione
 
@@ -92,17 +106,17 @@ evitare conflitti con altri progetti locali.)
 cd backend
 pip install -e ".[dev]"
 
-# Frontend (Node 20+)
+# Frontend (Node 22)
 cd ..\frontend
 npm install
 ```
 
-### 3. Avvio
+### 3. Avvio (sviluppo)
 
 ```powershell
 # Terminale 1 — Backend
 cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+python -m uvicorn app.main:app --port 8001 --reload
 ```
 
 ```powershell
@@ -112,38 +126,43 @@ npm run dev
 ```
 
 Apri **http://localhost:3000** e clicca **"Aggiorna annunci"** in homepage per
-lanciare il primo scraping — oppure vai avanti col comando manuale sotto.
+lanciare il primo scraping, oppure usa la CLI qui sotto.
 
-### 4. Scraping via CLI (alternativa al bottone UI)
+### 4. Scraping via CLI
 
 ```powershell
-# Tutti i portali abilitati sulla città default (bari)
 cd backend
-python -m scraper.runner
-
-# Un solo portale
-python -m scraper.runner --portal vistocasa
-
-# Città custom
-python -m scraper.runner --city milano
+python -m scraper.runner                      # tutti i portali, città di default
+python -m scraper.runner --portal vistocasa   # un solo portale
+python -m scraper.runner --city molfetta      # un'altra città
 ```
 
-### 5. Docker (alternativa)
+### 5. Docker
 
 ```powershell
-docker-compose up
+docker compose up -d --build     # oppure: make up
 ```
+
+Lo stack Docker è da "produzione": immagini buildate (backend senza reload,
+frontend col server standalone di Next, utente non-root), nessun mount del
+codice, DB in `./data`. Legge `./.env`; le variabili `NEXT_PUBLIC_*` (inclusa
+`NEXT_PUBLIC_CARTO_API_KEY`) finiscono nel bundle **al momento del build**,
+quindi vanno in `./.env` e dopo averle cambiate serve
+`docker compose build frontend`.
 
 ## URL & pagine
 
 | URL | Descrizione |
 |-----|-------------|
-| http://localhost:3000/ | Homepage con hero animato + bottone scan |
-| http://localhost:3000/search | Lista con filtri, sort esteso, page-size |
-| http://localhost:3000/map | Mappa + lista scrollabile + disegno perimetro |
-| http://localhost:3000/listing/{id} | Dettaglio con planimetrie e price-history |
+| http://localhost:3000/ | Homepage con bottone scan e data dell'ultimo aggiornamento |
+| http://localhost:3000/search | Lista con ricerca full-text, filtri, sort, page-size |
+| http://localhost:3000/map | Mappa + elenco con anteprima + disegno perimetro |
+| http://localhost:3000/listing/{id} | Dettaglio con planimetrie e storico prezzi |
 | http://localhost:3000/compare?ids=... | Confronto side-by-side fino a 3 |
+| http://localhost:3000/favorites | Preferiti |
+| http://localhost:3000/alerts | Ricerche salvate e novità |
 | http://localhost:8001/docs | Swagger UI del backend |
+| http://localhost:8001/metrics | Metriche Prometheus |
 
 ## Come funziona (guida all'uso)
 
@@ -160,7 +179,7 @@ Portale web  ──┐
                ▼
       [ListingItem] dataclass tipizzato
                ▼
-      [Pipeline] dedup + upsert + price-diff
+      [Pipeline] dedup + upsert + price-diff + rilevamento aste
                ▼
       [SQLite]  Listing (canonical) + ListingSource[] (repliche)
                ▼
@@ -179,120 +198,79 @@ badge "N fonti" sulla card.
 
 ### Prima esecuzione (DB vuoto)
 
-Dopo `npm run dev` e `uvicorn`, `data/immo.db` è vuoto: `/search` mostra
-"Nessun risultato". Serve popolare — due modi:
+All'avvio il backend crea `data/immo.db` e applica le migrazioni: `/search`
+mostra "Nessun risultato" finché non lo popoli, col bottone **"Aggiorna
+annunci"** (consigliato: il toast segue il progresso) o con la CLI.
 
-1. **Bottone "Aggiorna annunci" in homepage** (consigliato). Un click →
-   lancio subprocess → toast in basso a destra segue il progresso.
-2. **CLI**: `python -m scraper.runner --city bari` dalla cartella `backend`.
-   Scrive gli stessi record; il toast **non** compare perché il polling è
-   basato solo sull'endpoint status (che comunque risponde correttamente).
-
-Il primo scrape su Bari dura ~30-40 min (~7000 listings totali). Immobiliare
-è il più lento in fase search, casa.it è il più lento in fase fetch per via
-del rate-limit conservativo (60 req/min).
+Il primo scrape su Bari dura ~30-40 min (~7000 annunci). Immobiliare è il più
+lento in fase di ricerca, casa.it in fase di dettaglio per via del rate-limit
+prudente (il suo WAF banna i client aggressivi).
 
 ### La scansione one-click, passo per passo
 
-1. Utente clicca **"Aggiorna annunci"** in homepage → `POST /api/scrape/trigger`
+1. Utente clicca **"Aggiorna annunci"** → `POST /api/v1/scrape/trigger`
 2. Il backend lancia `python -m scraper.runner` come **processo detached** e
-   ritorna `202 Accepted` immediatamente (nessun blocking)
-3. Il processo scraper crea un `job_id` UUID e stampa una `ScrapeRun` per
-   ogni portale abilitato, tutte con lo stesso `job_id`
-4. Dentro `run_spider`, un **ticker asincrono** ogni 2s copia lo stato del
-   `_ProgressBar` (fase, done, total) sulla riga DB
-5. Il **frontend** ha già mostrato il toast in `optimistic` mode; da quando
-   il polling di `useScrapeStatus` intercetta `is_running=true` (entro 500ms
-   grazie al burst di invalidation), inizia il polling a 2s
-6. `GET /api/scrape/status` filtra le `ScrapeRun` per `job_id` più recente
-   e restituisce un aggregato con `progress_done` / `progress_total` sommati
-7. Il toast calcola l'ETA client-side: `elapsed × remaining / done` (o
-   fallback a "1 sec/item" nei primi secondi)
-8. Al termine, `phase` diventa `done`, il toast si tinge di verde con il
-   riepilogo "N nuovi · M trovati" e auto-dismiss dopo 30s
+   ritorna `202 Accepted` immediatamente
+3. Il processo crea un `job_id` e una `ScrapeRun` per ogni portale abilitato,
+   tutte con lo stesso `job_id`
+4. Ogni spider lavora in due fasi — **ricerca** (pagine dei risultati) e
+   **dettaglio** (solo gli annunci nuovi) — e un ticker ogni 2s copia fase e
+   avanzamento sulla sua riga
+5. Il toast appare subito (aggiornamento ottimistico) e da lì interroga
+   `GET /api/v1/scrape/status` ogni 2s
+6. L'ETA usa la velocità misurata **nella fase corrente** (in ricerca copre
+   solo le pagine di ricerca, e lo dice)
+7. Alla fine: riepilogo "N verificati · M nuovi", esito per portale (⚠ se con
+   errori, "(parziale)" se il catalogo non è stato visto tutto), chiusura
+   automatica dopo 30s. Gli avvisi e-mail delle ricerche salvate partono qui.
 
 Se il backend crasha o viene riavviato durante lo scan, il subprocess
-**sopravvive** perché è staccato dal parent. Il toast resta accurato appena
-il backend riparte.
+**sopravvive**. Una run senza heartbeat da troppo tempo viene marcata
+`failed` (worker morto).
 
 ### La ricerca su `/search`
 
-- **Filtri collassabili** in sidebar (10+ sezioni). Ogni scelta aggiorna
-  un query param via **nuqs**, immediatamente visibile in URL. React Query
-  detecta il cambio di key → refetch.
-- I filtri attivi diventano **chip** sopra la lista, con X singola. Un
-  filtro rimosso re-esegue subito la ricerca senza toccare gli altri.
-- **Sort** (dropdown): data recente / prezzo asc/desc / €/m² asc/desc /
-  superficie. Tutti mappati a `ORDER BY` con `NULLS LAST`.
-- **Page size** (20/50/100) — utile per rivedere velocemente tante schede.
-  Cambiare il size riporta a pagina 1.
-- **Toggle grid/list** (icone in ResultsHeader): grid = card con foto
-  aspect-ratio 4:3; list = riga orizzontale con anteprima descrizione.
-- **Bottone "Mappa"** accanto ai selettori → naviga a `/map`
-  preservando *tutti* i filtri via `Header.PRESERVED_PARAMS`.
+- **Filtri collassabili** in sidebar. Ogni scelta aggiorna un query param via
+  **nuqs**, visibile in URL; React Query rileva il cambio di chiave → refetch.
+- I filtri attivi diventano **chip** sopra la lista, con X singola.
+- La casella di ricerca usa **FTS5** con prefissi: le parole italiane vengono
+  troncate alla radice, così singolare e plurale trovano gli stessi annunci.
+- **Pubblicato**: ultimi N giorni o da una data; **Aste**: tutte / solo /
+  escludi.
+- **Sort**: data / prezzo / €/m² / superficie, con `NULLS LAST`.
+- **Bottone "Mappa"** → `/map` preservando *tutti* i filtri.
 
-### La mappa con disegno del perimetro
+### La mappa
 
-- Split-pane: **lista scrollabile a sinistra** (200-2000 marker, tagliata
-  a `limit`), **mappa Leaflet+OSM a destra**. Ogni pin è un `divIcon`
-  custom con prezzo abbreviato (`€250k`).
-- Hover su una card della lista → il pin corrispondente si evidenzia
-  (bordo scuro, z-index alto). Click su un pin → apre popup + scroll
-  della lista al listing.
-- **Pan/zoom** della mappa → `moveend` emette il bbox della viewport →
-  refetch dei marker filtrati sull'area visibile.
-- **Bottone "Disegna area"** (icona matita) →
-  1. Cursore diventa crosshair, viewport-sync in pausa
-  2. Ogni click sulla mappa aggiunge un vertice (dot + polyline
-     tratteggiata blu)
-  3. **Invio** o **Termina (N)** chiude il polygon (richiede N≥3)
-  4. **Esc** o **Annulla** esce senza salvare
-- Il polygon finalizzato viene serializzato come
-  `polygon=lat,lng;lat,lng;...` in URL. Backend fa: `polygon.bbox()` come
-  pre-filtro SQL (indicizzato), poi point-in-polygon Python per il
-  refinement esatto.
-- Il perimetro è **preservato** navigando a `/search`: la lista mostra
-  banner blu "Area disegnata attiva" + chip "Area disegnata (N pt)"
-  nella barra dei filtri, con X per rimuoverlo.
+- **Elenco a sinistra**, mappa a destra (su telefono: interruttore
+  Mappa/Elenco). Hover su una riga → il pin si evidenzia; click su un pin →
+  la riga si apre e scorre in vista.
+- **Anteprima**: cliccando una riga si espande (le altre si compattano) con
+  foto, dati, dotazioni e descrizione. L'altezza si adatta per mostrare tutti
+  i dati senza scrollare; si ridimensiona trascinando la maniglia (o ↑/↓,
+  doppio clic per tutta altezza).
+- **Pan/zoom** → il bbox della viewport filtra i marker; i pin vicini si
+  raggruppano in cluster (supercluster) col numero di annunci.
+- **Disegna area** (matita): click per i vertici, **Invio**/"Termina" per
+  chiudere (≥3 vertici), **Esc** per annullare. Il polygon va in URL come
+  `polygon=lat,lng;lat,lng;...`; il backend pre-filtra sulla bounding box
+  (indicizzata) e rifinisce con point-in-polygon.
 
-### Il badge variazione prezzo
+### Storico e variazione prezzo
 
-Quando lo scraper trova un listing conosciuto e il **prezzo sulla search
-page** è diverso da quello in DB (tolleranza €1 per evitare jitter di
-arrotondamento), aggiorna: `price` = nuovo, `price_previous` = vecchio,
-`price_changed_at` = adesso. Il `PriceChangeBadge` calcola il delta % e
-mostra:
+Quando lo scraper ritrova un annuncio noto con un **prezzo diverso sulla
+pagina di ricerca** (tolleranza €1), aggiorna `price`, `price_previous`,
+`price_changed_at` e aggiunge un punto a `listing_price_history`. Il badge
+mostra il delta % (↓ verde / ↑ rosso, tooltip "Variato N giorni fa · prima
+€X"); il dettaglio mostra il grafico. Portali con prezzo dalle pagine di
+ricerca: Immobiliare.it, Casa.it, RE/MAX, Vistocasa.
 
-- **↓ verde** con % negativa e prezzo precedente strikethrough se
-  ridotto (l'evento più utile per un cercatore)
-- **↑ rosso** con % positiva se aumentato
-- Tooltip: "Variato N giorni fa · prima €X"
+### Ricerche salvate
 
-Il badge appare su ListingCard grid, ListingCard list e nell'header del
-dettaglio.
-
-### Planimetrie in galleria dettaglio
-
-Sul dettaglio, le planimetrie (`floor_plans[]`, array separato dagli
-`images[]`) vengono **prependute** all'array della galleria:
-
-```tsx
-const images = [...floorPlans, ...photos];
-```
-
-Sull'immagine corrente compare un badge **"Planimetria N/M"** quando è
-una planimetria; sui thumbnail un mini-marker **"Plan"** in alto. Se
-l'utente è su una foto e ci sono planimetrie, il badge diventa CTA
-"Vai alla planimetria" → scroll del carousel a index 0.
-
-### Confronto multi-annuncio
-
-Da qualsiasi card della lista, un **checkbox** aggiunge il listing al set
-`compareIds` (state locale, max 3). Quando `size ≥ 2` compare un floating
-button "Confronta (N)". Click → naviga a `/compare?ids=a,b,c` che fa 3
-query React Query in parallelo e renderizza una tabella side-by-side con
-tutte le proprietà (prezzo, superficie, locali, classe energetica,
-caratteristiche booleane con ✓/✗).
+"Salva ricerca" memorizza i filtri correnti. `/alerts` conta per ognuna gli
+annunci nuovi e i ribassi da quando l'hai vista l'ultima volta ("segna come
+vista" sposta il segnalibro). Con SMTP configurato, dopo ogni scansione arriva
+un'e-mail con le novità di tutte le ricerche.
 
 ### Refresh mentale del flusso
 
@@ -301,60 +279,86 @@ Se qualcosa non funziona, chiediti in che punto della catena sei:
 - **Non vedo l'annuncio nella lista** → è nel DB? (`sqlite3 data/immo.db
   "SELECT COUNT(*) FROM listings WHERE ..."`). Se sì è un problema API/UI;
   se no è un problema scraper.
-- **Il toast non appare mai** → `GET /api/scrape/status` risponde? La
-  scan sta scrivendo `ScrapeRun` rows? (`SELECT * FROM scrape_runs ORDER
-  BY started_at DESC LIMIT 5`)
-- **Il polygon non filtra** → la stringa `polygon` è ben formata in URL?
-  (`lat,lng;lat,lng;...` con almeno 3 vertici) — se torna null il backend
-  fa fall-through al filtro senza polygon.
-- **Il prezzo non aggiorna** → lo spider ha implementato
-  `parse_search_results_with_prices`? (solo immobiliare, casa e vistocasa
-  la override).
+- **Il toast non appare mai** → `GET /api/v1/scrape/status` risponde? La
+  scan sta scrivendo righe `scrape_runs`?
+- **Una scansione è "completata con errori"** → `GET
+  /api/v1/scrape/runs/{id}/errors` elenca gli errori strutturati (http,
+  network, parse, blocked…).
+- **Il polygon non filtra** → la stringa `polygon` in URL è ben formata
+  (almeno 3 vertici)?
 
 ## API principali
 
+La API canonica è `/api/v1` (documentata in `/docs`); `/api` resta come alias
+non versionato. Se `ADMIN_TOKEN` è impostato, gli endpoint che modificano
+richiedono l'header `X-Admin-Token`.
+
 | Endpoint | Descrizione |
 |----------|-------------|
-| `GET /api/listings` | Ricerca paginata: 25+ query params (filtri, `polygon`, `bbox`, `sort`, `page_size`) |
-| `GET /api/listings/{id}` | Dettaglio annuncio con tutte le `sources` |
-| `GET /api/listings/{id}/similar` | Annunci simili (stesso portale/città/tipo) |
-| `GET /api/listings/map` | Marker snelli per la mappa (max 2000, `polygon`+`bbox` supportati) |
-| `GET /api/stats` | Contatori per portale/città, media €/m², ultime run |
-| `POST /api/scrape/trigger` | Lancia scraping come subprocess (202 immediato) |
-| `GET /api/scrape/status` | Aggregato del job più recente (progress, ETA, heartbeat) |
-| `GET /api/scrape/runs` | Cronologia degli ultimi 20 run per debug |
+| `GET /api/v1/listings` | Ricerca paginata: filtri, `q` (full-text), `polygon`, `bbox`, `sort`, `page_size` |
+| `GET /api/v1/listings/map` | Marker snelli per la mappa (max 2000) |
+| `GET /api/v1/listings/{id}` | Dettaglio con tutte le `sources` |
+| `GET /api/v1/listings/{id}/similar` | Annunci simili |
+| `GET /api/v1/listings/{id}/price-history` | Storico prezzi |
+| `GET/PUT/DELETE /api/v1/favorites…` | Preferiti |
+| `GET/POST/PATCH/DELETE /api/v1/alerts…` | Ricerche salvate; `POST /alerts/{id}/seen` |
+| `POST /api/v1/scrape/trigger` | Lancia lo scraping come subprocess (202 immediato) |
+| `GET /api/v1/scrape/status` | Avanzamento del job più recente |
+| `GET /api/v1/scrape/last-update` | Ultimo aggiornamento, complessivo e per portale |
+| `GET /api/v1/scrape/runs` · `/runs/{id}/errors` · `/errors` | Cronologia ed errori |
+| `GET /api/v1/stats` | Contatori per portale/città, media €/m² |
+| `GET /metrics` | Metriche Prometheus |
+| `GET /health` | Healthcheck |
+
+## Osservabilità
+
+**Metriche** (`/metrics`, formato Prometheus; `METRICS_ENABLED=false` per
+spegnerle se l'API è esposta):
+
+| Metrica | Cosa misura |
+|---------|-------------|
+| `immo_http_request_duration_seconds{method,route,status}` | Latenza API per route (template, non path) |
+| `immo_listings{portal,state}` | Annunci attivi/inattivi per portale |
+| `immo_scrape_running` | Scansioni in corso |
+| `immo_scrape_last_success_timestamp_seconds{portal}` | Ultima scansione riuscita — l'allarme utile è sulla sua età |
+| `immo_scrape_last_duration_seconds{portal}` · `_last_status` · `_last_coverage_complete` · `_last_listings{kind}` | Esito dell'ultima scansione per portale |
+| `immo_scrape_errors_total{portal,kind}` | Errori di scraping per tipo |
+
+Le scansioni girano in un processo separato: queste cifre vengono lette dal DB
+condiviso a ogni richiesta, non da contatori in memoria.
+
+**Errori** — con `SENTRY_DSN` impostato, le eccezioni non gestite di API e
+scraper (più crash degli spider ed errori della pipeline) vanno su Sentry,
+etichettate `component=api|scraper`, senza dati personali.
 
 ## Architettura
 
 ```
 backend/
   app/
-    api/           Endpoint FastAPI (listings, scrape, stats)
-    models/       SQLAlchemy: Listing, ListingSource, ScrapeRun, Favorite
-    schemas/      Pydantic DTOs
-    services/     Business logic (dedup, filtri, marker projection)
-    utils/        Helpers (text norm, logging)
+    api/           Endpoint FastAPI (listings, favorites, alerts, scrape, stats, metrics)
+    models/        SQLAlchemy: Listing, ListingSource, ListingPriceHistory,
+                   ScrapeRun, ScrapeError, Favorite, SearchAlert
+    schemas/       Pydantic DTOs
+    services/      Business logic (filtri, FTS, dedup, avvisi, scheduler)
+    observability.py  Sentry + middleware delle metriche
+  alembic/         Migrazioni (applicate all'avvio)
   scraper/
-    spiders/      6 spider + BaseSpider abstract + PlaywrightSpider (idealista)
-    utils/        Rate limiter, JSON-LD, agency parser, HTML extract
-    pipeline.py   Dedup + upsert batch (SAVEPOINT per-item), price-diff
-    runner.py     Orchestratore CLI + ticker async per il progress DB
-    items.py      Dataclass ListingItem
+    spiders/       6 spider + BaseSpider + PlaywrightSpider (idealista)
+    utils/         Rate limiter, JSON-LD, RSC flight (Next.js), HTML extract
+    pipeline.py    Dedup + upsert batch, price-diff, aste, disattivazione
+    runner.py      Orchestratore CLI + ticker async per il progress DB
+  tests/           pytest (API, parser, pipeline, migrazioni) — mai sul DB reale
 frontend/
-  src/app/
-    page.tsx        Homepage con bottone scan e blob animati
-    search/         Vista lista
-    map/            Vista mappa con drawing perimetro
-    listing/[id]/   Dettaglio con galleria planimetrie-first
-    compare/        Confronto side-by-side
+  src/app/         Pagine: home, search, map, listing/[id], compare, favorites, alerts
   src/components/
-    listings/       Card grid/list, PriceChangeBadge
-    search/         FilterFields (condiviso), FilterSidebar, ActiveFilters, ResultsHeader
-    map/            MapView (react-leaflet), MapFilters (dropdown)
-    scrape/         ScrapeProgressToast (persistente, mount globale)
-    ui/             Badge, Skeleton, ImageLightbox
-  src/hooks/        useListings, useScrapeStatus (polling adattivo)
-  src/lib/          api client, types, utils di formattazione
+    listings/      Card, icone delle caratteristiche, badge prezzo/asta, storico
+    search/        FilterFields (condivisi), sidebar, chip, salva ricerca
+    map/           MapView (Leaflet + cluster), righe con anteprima, filtri
+    scrape/        Toast di avanzamento (montato in RootLayout)
+    ui/            Badge, Skeleton, ImageLightbox
+  src/hooks/       useListings, useScrapeStatus, …
+  src/lib/         api client, types, utils di formattazione
 ```
 
 ## Deep dive per contributori
@@ -363,86 +367,94 @@ Le scelte non-ovvie del codice, per chi ci mette mano:
 
 ### Scraping — snapshot immutabile
 Il pipeline (`scraper/pipeline.py`) usa `get_known_source_ids(portal)` per
-sapere quali listing sono già in DB. La spider skippa la detail-fetch per
-questi, e il pipeline si limita a bumpare `last_seen_at` e aggiornare
-`price`/`price_previous` se il prezzo sulla search page è cambiato. Nessun
-altro campo viene mai sovrascritto: la fotografia originale resta storicizzata.
-Per forzare un re-fetch di un annuncio specifico: `DELETE FROM listings WHERE
-source_id = ?` e rilancia lo scraper.
+sapere quali annunci sono già in DB. Lo spider salta il detail-fetch per
+questi, e il pipeline si limita a bumpare `last_seen_at`, aggiornare l'URL e
+il prezzo se è cambiato. Nessun altro campo viene sovrascritto. Per forzare
+un re-fetch: `DELETE FROM listings WHERE source_id = ?` e rilancia.
+
+### Scraping — copertura e disattivazione
+Una scansione è "a copertura completa" solo se ha percorso tutte le pagine di
+ricerca senza crash né blocchi. Solo allora gli annunci di quel portale, **in
+quelle città**, non visti da `LISTING_INACTIVE_DAYS` giorni vengono
+disattivati: una scansione troncata o bloccata non "cancella" annunci che
+semplicemente non ha raggiunto. Un 404/410 in dettaglio è registrato come
+annuncio rimosso, non come errore.
+
+### Scraping — circuit breaker ed errori strutturati
+Dopo `SCRAPE_CIRCUIT_BREAKER_THRESHOLD` richieste fallite di fila lo spider
+smette di colpire il portale per il resto della run (bloccato o giù) invece
+di aggravare il ban. Ogni errore finisce in `scrape_errors` con tipo, URL e
+status.
 
 ### Scraping — publication_date via CDN
 Gabetti e Vistocasa non pubblicano date nell'HTML. Trucco: HEAD sulla prima
-immagine del listing → `Last-Modified` del CDN riflette la data di upload
-della foto, ottimo proxy per la data di pubblicazione. Vedi
-`_pub_date_from_image()` in `gabetti.py` e `vistocasa.py`.
+immagine → il `Last-Modified` del CDN è un buon proxy della data di
+pubblicazione. Vedi `_pub_date_from_image()` in `gabetti.py` e `vistocasa.py`.
 
-### Scraping — casa.it URL template
-Le immagini di casa.it sono su
-`https://images-1.casa.it/{size}/listing/{mediaid}`. Il segmento `/listing/`
-è essenziale: senza, il CDN torna 400 "Invalid URI format". Documentato in
-`casa.py:parse_listing` — facile da rompere se qualcuno cambia il template.
+### Scraping — casa.it
+Il parser legge, in ordine, `__NEXT_DATA__` (`pdp`), JSON-LD, coppie
+etichetta/valore e testo; ogni gruppo di campi ha il suo estrattore in
+`casa.py`. Le immagini sono su `https://images-1.casa.it/{size}/listing/{mediaid}`:
+senza il segmento `/listing/` il CDN torna 400.
+
+### Scraping — RE/MAX (Next.js RSC)
+Il sito non ha più HTML con i dati: stanno nel "flight" React Server
+Components nelle `<script>`. `scraper/utils/rsc.py` ricompone il payload e
+risolve i riferimenti `$NN` ai blocchi di testo.
 
 ### Scraping — pagination ASP.NET (vistocasa)
-Vistocasa è un WebForms puro con `__doPostBack` per la paginazione: la spider
-override `run()` e fa GET → POST con `__EVENTTARGET=ctlNN` + `__VIEWSTATE`
-rigenerato per pagina. Se il POST fallisce 3 volte di seguito, break early:
-di solito significa che la sessione WebForms è morta.
-
-### Backend — polygon filter
-Il perimetro disegnato dall'utente (`polygon=lat,lng;lat,lng;...`) viene
-usato come pre-filtro SQL sulla sua bounding box (indicizzata via `lat`/`lng`),
-poi refinato in Python con ray-casting per il vero point-in-polygon. Per
-~3000 righe è <5ms; se il DB cresce >100k considera PostGIS.
+Vistocasa è WebForms puro con `__doPostBack`: lo spider fa GET → POST con
+`__EVENTTARGET` + `__VIEWSTATE` rigenerato per pagina; tre POST falliti di
+fila → stop (sessione morta).
 
 ### Backend — scrape trigger come subprocess detached
-`POST /api/scrape/trigger` **non** usa `BackgroundTasks` (morirebbero al
-prossimo reload di uvicorn). Lancia invece `python -m scraper.runner` come
-processo indipendente con `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`
-(Windows). Il processo scrive sul DB condiviso via il ticker async, e
-l'endpoint `/api/scrape/status` legge lo stato. Riavvii del backend non
-interrompono lo scraping.
+`POST /scrape/trigger` **non** usa `BackgroundTasks` (morirebbero al prossimo
+reload di uvicorn): lancia `python -m scraper.runner` come processo
+indipendente, che scrive sul DB condiviso; `/scrape/status` aggrega le run per
+`job_id`. I riavvii del backend non interrompono lo scraping.
 
-### Backend — aggregazione status via job_id
-Ogni invocazione di `run_all_spiders` genera un `job_id` uuid; tutti i
-`ScrapeRun` di quell'invocazione lo condividono. `/api/scrape/status`
-filtra sul `job_id` del run più recente, isolando pulitamente il job in
-corso da qualsiasi run precedente (anche orfani). Il clustering temporale
-(usato prima) era fragile con job triggerati a pochi minuti di distanza.
+### Backend — ricerca full-text
+`listings_fts` è un indice FTS5 *external content* sincronizzato da trigger.
+Le parole cercate diventano prefissi troncati alla radice ("terrazzo" →
+`terrazz*`), così singolare/plurale/femminile trovano gli stessi annunci.
 
-### Backend — reporter `_phase` vs `_phase_key`
-`_ProgressBar._phase` è il label italiano ("Ricerca"/"Elaborazione") per
-il terminal. `_phase_key` è la chiave canonica (`search`/`fetch`/`done`/
-`failed`) usata da DB e frontend. Sono due proprietà separate perché
-servono a due consumatori con requisiti diversi.
+### Backend — polygon filter
+Pre-filtro SQL sulla bounding box (indicizzata via `lat`/`lng`), poi
+ray-casting in Python. Per qualche migliaio di righe è <5ms; oltre i 100k
+annunci conviene PostGIS.
 
 ### Frontend — nuqs come single source of truth
-Ogni filtro (city, price_min, polygon, sort, page_size...) vive in URL
-via `nuqs`. Nessun useState locale duplicato. Vantaggi: refresh conserva
-lo stato, URL condivisibili, navigazione Search↔Map preserva i filtri
-via `Header.PRESERVED_PARAMS`. Escluso di proposito il `bbox` (specifico
-alla viewport della mappa) e il `page` (deve resettare a 1 quando cambi
-filtro).
+Ogni filtro vive in URL via `nuqs`: refresh conserva lo stato, URL
+condivisibili, navigazione Search↔Map preserva i filtri. Esclusi di proposito
+`bbox` (specifico della viewport) e `page` (torna a 1 cambiando filtro).
 
-### Frontend — toast persistente non-sonner
-`ScrapeProgressToast` è un componente React custom montato in
-`RootLayout`, non un toast di libreria. Motivo: deve sopravvivere ai
-route change e mostrare progress live via polling di `useScrapeStatus`
-con interval adattivo (2s se running, 30s se idle). ETA a due tier:
-`live_rate = done/elapsed` se abbiamo >=1s di dati, altrimenti baseline
-"1 item/s".
+### Frontend — immagini
+Le foto vengono dai CDN dei portali, che bloccano l'hotlinking lato server:
+niente `next/image`, ma riscrittura dell'URL verso la variante della
+dimensione giusta (`imageVariant`) e `referrerPolicy="no-referrer"`.
 
-## Configurazione (.env)
+## Configurazione
 
-Solo i campi non-ovvi:
+Variabili principali (elenco completo in `.env.example` e
+`frontend/.env.local.example`):
 
 | Variabile | Default | Note |
 |-----------|---------|------|
+| `DATABASE_URL` | `data/immo.db` alla root | Lasciala non impostata in locale |
 | `SCRAPE_DEFAULT_CITY` | `bari` | Città del run CLI e del bottone scan |
-| `SCRAPE_IDEALISTA_ENABLED` | `false` | DataDome blocca — accendere solo con proxy residenziale |
-| `SCRAPE_RATE_LIMIT_RPM` | 60 | Requests per minuto per dominio |
+| `SCRAPE_SCHEDULE_ENABLED` / `SCRAPE_INTERVAL_HOURS` | `false` / `6` | Scansioni periodiche automatiche (opt-in) |
+| `SCRAPE_IDEALISTA_ENABLED` | `false` | DataDome blocca — servirebbe un proxy residenziale |
+| `SCRAPE_RATE_LIMIT_RPM` / `SCRAPE_RATE_LIMITS` | 60 / per portale | Richieste al minuto (casa.it: 30) |
+| `SCRAPE_MAX_PAGES` | 200 | Tetto di pagine di ricerca per portale |
 | `SCRAPE_CONCURRENCY` | 4 | Detail fetch concorrenti per spider |
 | `DEDUP_THRESHOLD` | 0.85 | Score cross-portale per considerare due annunci uguali |
-| `LISTING_INACTIVE_DAYS` | 14 | Dopo N giorni di silenzio → `is_active=False` |
+| `LISTING_INACTIVE_DAYS` | 14 | Giorni senza avvistamenti prima di disattivare (solo con copertura completa) |
+| `ADMIN_TOKEN` / `NEXT_PUBLIC_ADMIN_TOKEN` | vuoto | Protegge gli endpoint che modificano; i due valori devono coincidere |
+| `SMTP_HOST`, `SMTP_*`, `ALERT_EMAIL_TO` | vuoto | E-mail di riepilogo delle ricerche salvate |
+| `METRICS_ENABLED` | `true` | Espone `/metrics` |
+| `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | vuoto / `development` / `0.0` | Errori su Sentry |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | URL del backend visto dal browser |
+| `NEXT_PUBLIC_CARTO_API_KEY` | vuoto | Mappe CARTO; senza, OpenStreetMap |
 
 ## Deduplicazione — algoritmo
 
@@ -454,61 +466,54 @@ Score pesato in `app.services.dedup_service.find_duplicate`:
 - **Geolocalizzazione** (distanza haversine): 15%
 - **Numero stanze**: 10%
 
-Soglia >= 0.85 per merge. Il portale con priorità più bassa (in
-`PORTAL_PRIORITY = ["immobiliare", "casa", "tecnocasa", "gabetti", "remax",
-"idealista"]`) resta canonical; gli altri diventano `ListingSource`. Se
-arriva un match da un portale con priorità più alta, viene fatto un
-`_promote_listing` che sovrascrive i campi canonical mantenendo `listing.id`
-stabile.
+Soglia ≥ 0.85 per il merge. Il portale che viene prima in `PORTAL_PRIORITY =
+["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa",
+"idealista"]` resta canonical; gli altri diventano `ListingSource`. Se arriva
+un match da un portale con priorità più alta, `_promote_listing` sovrascrive i
+campi canonical mantenendo stabile `listing.id`.
 
-## Troubleshooting
-
-**"Il bottone Aggiorna annunci non fa nulla"** — Controlla nei log del
-backend che la POST a `/api/scrape/trigger` sia arrivata. Poi verifica
-il subprocess: `tasklist | findstr python`. Su Windows, se il subprocess
-non parte, è quasi sempre un problema con `sys.executable` che punta a
-un venv sbagliato.
-
-**"Il toast dice `heartbeat 200s`"** — Lo scraper è bloccato (probabilmente
-casa.it rate-limitato). Aspetta o killa il processo Python del runner.
-
-**"Casa.it torna 400 sulle immagini"** — Controllo del template URL: dopo
-la fix devono contenere `/listing/`. Se recente scraper ha salvato le
-vecchie, DELETE i listing e re-scrappa.
-
-**"Vistocasa non mostra planimetrie"** — Filtro `data-fancybox="planimetria"`
-in BeautifulSoup può fallire se il sito cambia markup. Vedi
-`vistocasa._extract_floor_plans()`.
-
-## Test scraper
-
-Nessun test unit ancora — solo smoke test manuale via:
+## Test e qualità
 
 ```powershell
 cd backend
-python -c "
-import asyncio
-from scraper.spiders.vistocasa import VistocasaSpider
-from scraper.spiders.base import SearchParams
-from scraper.utils.rate_limiter import RateLimiter
+pytest -q          # ~220 test: API, parser (HTML sintetico), pipeline, migrazioni
+ruff check .
 
-async def main():
-    sp = VistocasaSpider(rate_limiter=RateLimiter(requests_per_minute=120))
-    async for item in sp.run(SearchParams(city='bari', max_pages=1)):
-        print(item.title, item.price)
-    await sp.close()
-
-asyncio.run(main())
-"
+cd ..\frontend
+npm run lint
+npm run typecheck
 ```
+
+I test girano ciascuno su un DB SQLite temporaneo e non possono lanciare
+processi: il DB reale `data/immo.db` non viene mai toccato. Gli hook
+pre-commit (`pre-commit install`) eseguono ruff, eslint e tsc; la CI su GitHub
+esegue test, lint, typecheck, build del frontend e build delle immagini Docker.
+
+## Troubleshooting
+
+**"Il bottone Aggiorna annunci non fa nulla"** — Controlla nei log del backend
+che la POST a `/api/v1/scrape/trigger` sia arrivata (con `ADMIN_TOKEN`
+impostato serve anche `NEXT_PUBLIC_ADMIN_TOKEN`). Poi verifica il subprocess:
+`tasklist | findstr python`.
+
+**"Il toast dice: nessun aggiornamento da N s"** — Lo scraper è bloccato
+(spesso casa.it rate-limitato). Aspetta o termina il processo del runner: la
+run verrà marcata `failed`.
+
+**"Sulla mappa compare API KEY REQUIRED"** — Le mappe CARTO richiedono una
+chiave: impostala in `NEXT_PUBLIC_CARTO_API_KEY` (in `frontend/.env.local`, o
+in `.env` per Docker) e riavvia/ribuilda il frontend. Senza chiave si usa
+OpenStreetMap.
+
+**"Il backend non risponde più dopo aver salvato un file"** — Su Windows
+`uvicorn --reload` a volte resta bloccato in "Shutting down": riavvialo.
+
+**"Casa.it torna 400 sulle immagini"** — L'URL deve contenere `/listing/`.
 
 ## Note di progetto
 
-- **Path fissi Windows**: il progetto è configurato per un layout locale
-  (`C:\Users\giuli\Documents\Progetti\immo`). Il `.env` alla root ha un
-  `DATABASE_URL` assoluto; se cloni altrove, aggiornalo.
-- **Il DB `data/immo.db` non è versionato**: gitignore lo esclude
-  esplicitamente. Il primo scraping è necessario per popolarlo.
-- **Backend porta 8001 in dev**: la porta 8000 è spesso occupata da altri
-  progetti locali dello stesso autore. Cambia in `frontend/.env.local` se
-  preferisci 8000.
+- **Il DB `data/immo.db` non è versionato**: il primo scraping è necessario
+  per popolarlo. I backup pre-migrazione sono in `data/backups/`.
+- **Backend sulla porta 8001 in sviluppo** (la 8000 è spesso occupata): il
+  frontend la trova tramite `NEXT_PUBLIC_API_URL` in `frontend/.env.local`.
+  Docker usa la 8000.
