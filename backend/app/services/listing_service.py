@@ -1,11 +1,13 @@
 import json
 import math
+import re
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.listing import Listing
+from app.database import SEARCH_INDEX_TABLE
+from app.models.listing import Listing, ListingPriceHistory
 from app.schemas.listing import (
     ListingMarker,
     ListingMarkersResponse,
@@ -65,16 +67,65 @@ def listing_to_response(listing: Listing) -> ListingResponse:
     )
 
 
-def _apply_listing_filters(query, params: ListingSearchParams):
+_FTS_AVAILABLE: dict[str, bool] = {}
+
+
+async def has_search_index(db: AsyncSession) -> bool:
+    """Whether this database has the FTS5 index (migration 0005). Cached per
+    database URL: it's created at startup, before the first request."""
+    key = str(db.bind.url)
+    if key not in _FTS_AVAILABLE:
+        found = False
+        if db.bind.dialect.name == "sqlite":
+            row = await db.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :name"),
+                {"name": SEARCH_INDEX_TABLE},
+            )
+            found = row.first() is not None
+        _FTS_AVAILABLE[key] = found
+    return _FTS_AVAILABLE[key]
+
+
+_FINAL_VOWELS = "aeiouàèéìòù"
+
+
+def _fts_term(word: str) -> str:
+    # Short words match exactly: as a prefix "auto" would also hit
+    # "autonomo" (heating). Longer ones lose a final vowel and match as a
+    # prefix, a poor man's Italian stemmer covering gender and number:
+    # "terrazzo" → terrazz* (terrazzo, terrazza, terrazze), "trilo" → tril*.
+    if len(word) < 5:
+        return f'"{word}"'
+    stem = word[:-1] if word[-1] in _FINAL_VOWELS else word
+    return f'"{stem}"*'
+
+
+def fts_match_query(raw: str) -> str | None:
+    """User text → FTS5 MATCH expression requiring every word. Words are
+    quoted, so operators and punctuation in the input can't produce a
+    syntax error."""
+    words = re.findall(r"\w+", raw.lower())
+    return " ".join(_fts_term(w) for w in words) or None
+
+
+def _apply_listing_filters(query, params: ListingSearchParams, use_fts: bool = False):
     """Shared filter application for the paginated search and the map
     markers endpoint. Every WHERE clause derived from a search param lives
     here so both endpoints return consistent result sets.
     """
     query = query.where(Listing.is_active.is_(True))
 
-    # Full-text search via FTS5
-    if params.q:
-        # Use LIKE fallback since FTS5 virtual table requires raw SQL
+    match = fts_match_query(params.q) if params.q and use_fts else None
+    if match:
+        # Indexed, accent-insensitive, prefix match on every word.
+        query = query.where(
+            text(
+                f"listings.rowid IN (SELECT rowid FROM {SEARCH_INDEX_TABLE} "
+                f"WHERE {SEARCH_INDEX_TABLE} MATCH :fts_match)"
+            ).bindparams(fts_match=match)
+        )
+    elif params.q:
+        # No index (non-SQLite DB, or a schema built without migrations).
         search_term = f"%{params.q}%"
         query = query.where(
             (Listing.title.ilike(search_term))
@@ -251,7 +302,7 @@ def point_in_polygon(lat: float, lng: float, poly: list[tuple[float, float]]) ->
 
 async def search_listings(db: AsyncSession, params: ListingSearchParams) -> PaginatedListings:
     query = select(Listing).options(selectinload(Listing.sources))
-    query = _apply_listing_filters(query, params)
+    query = _apply_listing_filters(query, params, use_fts=bool(params.q) and await has_search_index(db))
 
     # Sort. "newest" uses the original publication_date from the source
     # portal (what the user actually cares about), falling back to
@@ -330,7 +381,7 @@ async def get_listing_markers(
         Listing.rooms,
         Listing.images,
     ).where(Listing.lat.isnot(None), Listing.lng.isnot(None))
-    query = _apply_listing_filters(query, params)
+    query = _apply_listing_filters(query, params, use_fts=bool(params.q) and await has_search_index(db))
 
     # Newest first so that if we hit the cap the user still sees fresh inventory.
     query = query.order_by(
@@ -392,6 +443,16 @@ async def get_listing_detail(db: AsyncSession, listing_id: str) -> Listing | Non
         select(Listing).options(selectinload(Listing.sources)).where(Listing.id == listing_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_price_history(db: AsyncSession, listing_id: str) -> list[ListingPriceHistory]:
+    """Price observations for a listing, oldest first."""
+    result = await db.execute(
+        select(ListingPriceHistory)
+        .where(ListingPriceHistory.listing_id == listing_id)
+        .order_by(ListingPriceHistory.observed_at, ListingPriceHistory.id)
+    )
+    return list(result.scalars())
 
 
 async def get_similar_listings(db: AsyncSession, listing: Listing, limit: int = 6) -> list[Listing]:

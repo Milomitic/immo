@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 import app.models.listing  # noqa: F401  (register tables on Base.metadata)
 import app.models.scrape_run  # noqa: F401
 from app.config import settings
-from app.database import Base
+from app.database import Base, include_schema_name
 
 config = context.config
 if config.config_file_name is not None and not config.attributes.get("connection"):
@@ -37,6 +37,7 @@ def _configure(**kwargs) -> None:
         # table behind the scenes so column changes work there too.
         render_as_batch=True,
         compare_type=_compare_type,
+        include_name=include_schema_name,
         **kwargs,
     )
 

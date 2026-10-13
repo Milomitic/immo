@@ -11,6 +11,7 @@ import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
 import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo } from "@/lib/utils";
 import { ListingCard } from "@/components/listings/ListingCard";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
+import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
@@ -242,6 +243,8 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 {listing.condition && <Badge variant="outline">{conditionLabel(listing.condition)}</Badge>}
               </div>
             </div>
+
+            <PriceHistory listingId={listing.id} listingType={listing.listing_type} />
 
             {/* Key Facts */}
             <div>

@@ -113,3 +113,28 @@ class ListingSource(Base):
     __table_args__ = (
         Index("idx_sources_portal_id", "source_portal", "source_id", unique=True),
     )
+
+
+class ListingPriceHistory(Base):
+    """Append-only log of the prices shown for a listing.
+
+    One row when the listing is first stored and one per later change
+    (search-card diff, same-portal refresh, or a higher-priority portal
+    taking over as canonical — ``source_portal`` says which). The
+    ``price``/``price_previous`` columns on ``listings`` stay as the cheap
+    "latest change" summary; this table is the full series for charts.
+    """
+
+    __tablename__ = "listing_price_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    listing_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
+    )
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    source_portal: Mapped[str | None] = mapped_column(Text)
+    observed_at: Mapped[str] = mapped_column(Text, nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("idx_price_history_listing", "listing_id", "observed_at"),
+    )

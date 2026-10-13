@@ -69,6 +69,14 @@ class ListingDetailResponse(ListingResponse):
     sources: list[ListingSourceResponse] = []
 
 
+class PricePointResponse(BaseModel):
+    price: float
+    observed_at: str
+    source_portal: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class ListingSearchParams(BaseModel):
     q: str | None = None
     city: str | None = None

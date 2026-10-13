@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.config import settings
-from app.models.listing import Listing, ListingSource
+from app.models.listing import Listing, ListingPriceHistory, ListingSource
 from scraper.items import ListingItem
 from scraper.pipeline import (
     bump_last_seen,
@@ -149,6 +149,50 @@ async def test_price_jitter_below_one_euro_is_ignored(db_session):
 
     result = await update_prices_from_observations("immobiliare", {"1": 200000.4})
     assert result["changed"] == 0
+
+
+async def _history(session) -> list[tuple]:
+    rows = await session.execute(select(ListingPriceHistory).order_by(ListingPriceHistory.id))
+    return [(r.price, r.source_portal) for r in rows.scalars()]
+
+
+async def test_new_listing_starts_its_price_history(db_session):
+    await process_items_batch([item()], "run")
+    assert await _history(db_session) == [(200000.0, "immobiliare")]
+
+
+async def test_observed_price_change_extends_history(db_session):
+    await process_items_batch([item()], "run")
+    await update_prices_from_observations("immobiliare", {"100": 189000.0})
+    await update_prices_from_observations("immobiliare", {"100": 189000.4})  # jitter: no point
+    assert await _history(db_session) == [(200000.0, "immobiliare"), (189000.0, "immobiliare")]
+
+
+async def test_same_portal_refresh_records_the_change(db_session):
+    await process_items_batch([item()], "run-1")
+    await process_items_batch([item(price=210000.0)], "run-2")
+
+    db_session.expire_all()
+    row = (await db_session.execute(select(Listing))).scalar_one()
+    assert (row.price, row.price_previous) == (210000.0, 200000.0)
+    assert await _history(db_session) == [(200000.0, "immobiliare"), (210000.0, "immobiliare")]
+
+
+async def test_promotion_logs_the_new_canonical_price(db_session):
+    await process_items_batch(
+        [item(source_portal="casa", source_id="c-1", source_url="https://casa.it/c-1", price=198000.0)],
+        "run-1",
+    )
+    await process_items_batch([item()], "run-2")  # immobiliare takes over at 200k
+    assert await _history(db_session) == [(198000.0, "casa"), (200000.0, "immobiliare")]
+
+
+async def test_history_is_deleted_with_its_listing(db_session):
+    await process_items_batch([item()], "run")
+    await db_session.execute(delete(ListingSource))
+    await db_session.execute(delete(Listing))
+    await db_session.commit()
+    assert await count(db_session, ListingPriceHistory) == 0  # FK ON DELETE CASCADE
 
 
 async def test_known_source_ids_cover_both_tables(db_session):

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.models.listing import Listing, ListingSource
+from app.models.listing import Listing, ListingPriceHistory, ListingSource
 from app.services.dedup_service import find_duplicate
 from app.utils.text import normalize_address
 from scraper.items import ListingItem
@@ -78,9 +78,7 @@ async def update_prices_from_observations(
             ).all()
             for row_id, sid, current, area in rows:
                 new_price = observed[sid]
-                # Treat anything within €1 as unchanged — rounding noise on
-                # the portal side ("165.000€" one day, "165.001€" the next).
-                if current is not None and abs(current - new_price) < 1.0:
+                if not _price_changed(current, new_price):
                     continue
                 await db.execute(
                     update(Listing)
@@ -92,9 +90,33 @@ async def update_prices_from_observations(
                         price_per_sqm=round(new_price / area, 2) if area else None,
                     )
                 )
+                db.add(ListingPriceHistory(
+                    listing_id=row_id, price=new_price, source_portal=portal, observed_at=now,
+                ))
                 changed += 1
         await db.commit()
     return {"changed": changed, "checked": len(observed)}
+
+
+def _price_changed(before: float | None, after: float | None) -> bool:
+    # Anything within €1 is unchanged — rounding noise on the portal side
+    # ("165.000€" one day, "165.001€" the next).
+    if after is None:
+        return False
+    return before is None or abs(after - before) >= 1.0
+
+
+def _track_price(db: AsyncSession, listing: Listing, before: float | None, portal: str, now: str) -> None:
+    """After ``listing.price`` may have been rewritten: stamp the change on
+    the listing and append it to the price history."""
+    if not _price_changed(before, listing.price):
+        return
+    if before is not None:
+        listing.price_previous = before
+        listing.price_changed_at = now
+    db.add(ListingPriceHistory(
+        listing_id=listing.id, price=listing.price, source_portal=portal, observed_at=now,
+    ))
 
 
 # Keep IN (...) lists under SQLite's bound-parameter limit.
@@ -357,10 +379,12 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         # same portal as the current canonical — otherwise we'd overwrite
         # higher-priority data. For lower-priority refreshes, just bump
         # last_seen_at and enrich empty fields.
+        before = existing.price
         if existing.source_portal == item.source_portal:
             _update_listing(existing, item, now)
         else:
             _enrich_listing(existing, item, now)
+        _track_price(db, existing, before, item.source_portal, now)
         return "updated"
 
     # Step 2: Check cross-portal duplicate
@@ -395,6 +419,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
         # If the new item comes from a higher-priority portal (e.g. immobiliare)
         # than the current canonical, promote it — overwrite canonical fields
         # with the new item's data while keeping listing_id and all sources.
+        before = duplicate.price
         if _portal_rank(item.source_portal) < _portal_rank(duplicate.source_portal):
             logger.info(
                 "dedup_promote",
@@ -405,6 +430,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
             _promote_listing(duplicate, item, now)
         else:
             _enrich_listing(duplicate, item, now)
+        _track_price(db, duplicate, before, item.source_portal, now)
         logger.info("dedup_merged", portal=item.source_portal, source_id=item.source_id, canonical_id=duplicate.id)
         return "duplicate"
 
@@ -456,6 +482,7 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
     )
     db.add(listing)
     await db.flush()
+    _track_price(db, listing, None, item.source_portal, now)
 
     source = ListingSource(
         listing_id=listing.id,

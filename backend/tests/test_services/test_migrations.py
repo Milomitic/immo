@@ -7,12 +7,13 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.database import Base, apply_sqlite_pragmas, init_db
+from app.database import Base, apply_sqlite_pragmas, include_schema_name, init_db
 
 
 async def _schema_diff(engine) -> list:
     def _diff(sync_conn):
-        ctx = MigrationContext.configure(sync_conn)
+        # Same name filter as alembic/env.py: the FTS index isn't a model.
+        ctx = MigrationContext.configure(sync_conn, opts={"include_name": include_schema_name})
         return compare_metadata(ctx, Base.metadata)
 
     async with engine.connect() as conn:
@@ -99,4 +100,76 @@ async def test_init_db_is_idempotent(tmp_path):
     head = await _revision(engine)
     await init_db(engine)
     assert await _revision(engine) == head
+    await engine.dispose()
+
+
+_INSERT_LISTING = text(
+    "INSERT INTO listings (id, title, city, listing_url, source_portal, source_id, property_type,"
+    " listing_type, price, price_previous, price_changed_at,"
+    " created_at, updated_at, first_seen_at, last_seen_at, is_active)"
+    " VALUES (:id, 'Trilocale', 'bari', 'u', 'casa', :id, 'apartment', 'sale',"
+    " :price, :prev, :changed, '2026-01-01', '2026-01-01', '2026-01-01', '2026-01-01', 1)"
+)
+
+
+async def test_price_history_is_backfilled_from_listing_columns(tmp_path):
+    engine = _engine(tmp_path, "history.db")
+    from alembic import command
+
+    from app.database import _alembic_config
+
+    cfg = _alembic_config()
+
+    def _to_0003(sync_conn):
+        cfg.attributes["connection"] = sync_conn
+        command.upgrade(cfg, "0003")
+
+    async with engine.begin() as conn:
+        await conn.run_sync(_to_0003)
+        await conn.execute(_INSERT_LISTING, {"id": "changed", "price": 180000, "prev": 200000,
+                                             "changed": "2026-03-01"})
+        await conn.execute(_INSERT_LISTING, {"id": "steady", "price": 150000, "prev": None,
+                                             "changed": None})
+        await conn.execute(_INSERT_LISTING, {"id": "no-price", "price": None, "prev": None,
+                                             "changed": None})
+
+    await init_db(engine)
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT listing_id, price, observed_at FROM listing_price_history"
+            " ORDER BY listing_id, observed_at"
+        ))).all()
+    assert [tuple(r) for r in rows] == [
+        ("changed", 200000.0, "2026-01-01"),
+        ("changed", 180000.0, "2026-03-01"),
+        ("steady", 150000.0, "2026-01-01"),
+    ]
+    await engine.dispose()
+
+
+async def test_fulltext_index_follows_inserts_updates_and_deletes(tmp_path):
+    engine = _engine(tmp_path, "fts.db")
+    await init_db(engine)
+
+    async def hits(term: str) -> list[str]:
+        async with engine.connect() as conn:
+            rows = await conn.execute(text(
+                "SELECT l.id FROM listings l WHERE l.rowid IN"
+                " (SELECT rowid FROM listings_fts WHERE listings_fts MATCH :q) ORDER BY l.id"
+            ), {"q": term})
+            return [r[0] for r in rows]
+
+    async with engine.begin() as conn:
+        await conn.execute(_INSERT_LISTING, {"id": "a", "price": 1, "prev": None, "changed": None})
+        await conn.execute(text("UPDATE listings SET description = 'Vista sulla città' WHERE id = 'a'"))
+    assert await hits('"citta"') == ["a"]  # accent-insensitive
+
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE listings SET description = 'Vista mare' WHERE id = 'a'"))
+    assert await hits('"citta"') == []
+    assert await hits('"mar"*') == ["a"]
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM listings WHERE id = 'a'"))
+    assert await hits('"mare"') == []
     await engine.dispose()

@@ -41,6 +41,18 @@ class Base(DeclarativeBase):
     pass
 
 
+# FTS5 index over listings' text columns (migration 0005). A virtual table
+# plus shadow tables that SQLAlchemy models can't describe.
+SEARCH_INDEX_TABLE = "listings_fts"
+
+
+def include_schema_name(name, type_, parent_names) -> bool:
+    """Alembic name filter: the search index is managed by raw-SQL
+    migrations, so schema comparison must not report it as drift (and
+    autogenerate must never propose dropping it)."""
+    return not (type_ == "table" and name and name.startswith(SEARCH_INDEX_TABLE))
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         yield session

@@ -3,6 +3,7 @@ import type {
   ListingMarkersResponse,
   ListingSearchParams,
   PaginatedListings,
+  PricePoint,
   ScrapeStatus,
   ScrapeTriggerResponse,
   Stats,
@@ -69,6 +70,10 @@ export async function fetchListing(id: string): Promise<ListingDetail> {
 
 export async function fetchSimilarListings(id: string): Promise<Listing[]> {
   return fetchApi<Listing[]>(`/listings/${id}/similar`);
+}
+
+export async function fetchPriceHistory(id: string): Promise<PricePoint[]> {
+  return fetchApi<PricePoint[]>(`/listings/${id}/price-history`);
 }
 
 export async function fetchStats(): Promise<Stats> {

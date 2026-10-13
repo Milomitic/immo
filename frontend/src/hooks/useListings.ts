@@ -1,7 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { fetchListings, fetchListing, fetchMapMarkers, fetchSimilarListings, fetchStats } from "@/lib/api";
+import {
+  fetchListing,
+  fetchListings,
+  fetchMapMarkers,
+  fetchPriceHistory,
+  fetchSimilarListings,
+  fetchStats,
+} from "@/lib/api";
 import type { ListingSearchParams } from "@/lib/types";
 
 export function useListings(params: ListingSearchParams) {
@@ -35,6 +42,15 @@ export function useSimilarListings(id: string) {
     queryKey: ["similar", id],
     queryFn: () => fetchSimilarListings(id),
     enabled: !!id,
+  });
+}
+
+export function usePriceHistory(id: string) {
+  return useQuery({
+    queryKey: ["price-history", id],
+    queryFn: () => fetchPriceHistory(id),
+    enabled: !!id,
+    staleTime: 300_000,
   });
 }
 

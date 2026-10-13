@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from app.main import app
-from app.models.listing import ListingSource
+from app.models.listing import ListingPriceHistory, ListingSource
 from tests.conftest import make_listing
 
 # Inside the Bari test square: (41.12, 16.87). Outside: (41.30, 16.87).
@@ -114,3 +114,19 @@ async def test_similar_listings(client, seeded):
     r = await client.get(f"/api/listings/{seeded['a']}/similar")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+async def test_price_history_oldest_first(client, seeded, db_session):
+    db_session.add_all([
+        ListingPriceHistory(listing_id=seeded["a"], price=150000, source_portal="immobiliare",
+                            observed_at="2026-05-01T00:00:00+00:00"),
+        ListingPriceHistory(listing_id=seeded["a"], price=165000, source_portal="immobiliare",
+                            observed_at="2026-02-01T00:00:00+00:00"),
+    ])
+    await db_session.commit()
+
+    r = await client.get(f"/api/v1/listings/{seeded['a']}/price-history")
+    assert r.status_code == 200
+    assert [(p["price"], p["observed_at"][:7]) for p in r.json()] == [(165000, "2026-02"), (150000, "2026-05")]
+    assert (await client.get(f"/api/v1/listings/{seeded['b']}/price-history")).json() == []
+    assert (await client.get("/api/v1/listings/nope/price-history")).status_code == 404

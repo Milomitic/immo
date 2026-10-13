@@ -59,6 +59,13 @@ export interface ListingDetail extends Listing {
   sources: ListingSource[];
 }
 
+/** One observed price, oldest first in /price-history. */
+export interface PricePoint {
+  price: number;
+  observed_at: string;
+  source_portal: string | null;
+}
+
 export interface PaginatedListings {
   items: Listing[];
   total: number;

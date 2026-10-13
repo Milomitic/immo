@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.models.listing import Listing
 from app.schemas.listing import (
     ListingDetailResponse,
     ListingMarkersResponse,
@@ -9,10 +10,12 @@ from app.schemas.listing import (
     ListingSearchParams,
     ListingSourceResponse,
     PaginatedListings,
+    PricePointResponse,
 )
 from app.services.listing_service import (
     get_listing_detail,
     get_listing_markers,
+    get_price_history,
     get_similar_listings,
     listing_to_response,
     search_listings,
@@ -155,3 +158,13 @@ async def similar_listings(
 
     similar = await get_similar_listings(db, listing)
     return [listing_to_response(s) for s in similar]
+
+
+@router.get("/{listing_id}/price-history", response_model=list[PricePointResponse])
+async def price_history(
+    listing_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[PricePointResponse]:
+    if await db.get(Listing, listing_id) is None:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return [PricePointResponse.model_validate(p) for p in await get_price_history(db, listing_id)]
