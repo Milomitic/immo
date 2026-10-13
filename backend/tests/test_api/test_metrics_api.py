@@ -70,17 +70,23 @@ async def test_metrics_reports_catalogue_and_scrapes(client, db_session):
 
 async def test_request_latency_is_labelled_by_route_template(client):
     await client.get("/api/v1/listings/does-not-exist")
+    await client.get("/api/listings/does-not-exist")
     await client.get("/no/such/path")
+    await client.delete("/api/v1/stats")  # right path, wrong method: 405
     m = _samples((await client.get("/metrics")).text)
 
     by_route = {
-        dict(labels).get("route"): dict(labels).get("status")
+        (dict(labels).get("method"), dict(labels).get("route")): dict(labels).get("status")
         for (name, labels) in m
         if name == "immo_http_request_duration_seconds_count"
     }
-    assert by_route["/api/v1/listings/{listing_id}"] == "4xx"
-    assert by_route["unmatched"] == "4xx"
-    assert "/api/v1/listings/does-not-exist" not in by_route
+    assert by_route[("GET", "/api/v1/listings/{listing_id}")] == "4xx"
+    assert by_route[("GET", "unmatched")] == "4xx"
+    assert by_route[("DELETE", "unmatched")] == "4xx"  # no endpoint ran
+    assert ("GET", "/metrics") in by_route
+    # the unversioned alias keeps its own prefix
+    assert by_route[("GET", "/api/listings/{listing_id}")] == "4xx"
+    assert all(route != "/api/v1/listings/does-not-exist" for _, route in by_route)
 
 
 async def test_metrics_can_be_disabled(client, monkeypatch):

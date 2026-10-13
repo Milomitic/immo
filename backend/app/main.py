@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.alerts import router as alerts_router
@@ -12,7 +12,7 @@ from app.api.scrape import router as scrape_router
 from app.api.stats import router as stats_router
 from app.config import settings
 from app.database import init_db
-from app.observability import MetricsMiddleware, init_sentry
+from app.observability import MetricsMiddleware, init_sentry, record_route
 from app.services.scheduler import run_scheduler
 from app.utils.logging import setup_logging
 
@@ -40,6 +40,8 @@ app = FastAPI(
     description="Real estate listing aggregator",
     version="0.1.0",
     lifespan=lifespan,
+    # tells MetricsMiddleware which route template each request matched
+    dependencies=[Depends(record_route)],
 )
 
 app.add_middleware(

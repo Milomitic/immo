@@ -4,6 +4,7 @@ import time
 
 import sentry_sdk
 import structlog
+from fastapi import Request
 from prometheus_client import CollectorRegistry, Histogram, ProcessCollector
 
 from app.config import settings
@@ -39,10 +40,18 @@ def init_sentry(component: str) -> None:
     logger.info("sentry_enabled", component=component)
 
 
+_ROUTE_KEY = "immo.route"
+
+
 class MetricsMiddleware:
     """Time every HTTP request, labelled by the matched route *template*
     (``/api/v1/listings/{listing_id}``), never the raw path — one series
-    per listing id would grow without bound."""
+    per listing id would grow without bound.
+
+    The template comes from ``record_route``, a global dependency: only
+    inside the endpoint is the matched route known (FastAPI ≥ 0.14x
+    resolves included routers in a child scope the middleware never sees).
+    Requests that match no endpoint (404, 405) are "unmatched"."""
 
     def __init__(self, app):
         self.app = app
@@ -54,6 +63,10 @@ class MetricsMiddleware:
 
         start = time.perf_counter()
         status = 500  # what the client gets if the app raises
+        # Shared by reference with the endpoint's scope, even when that
+        # scope is a copy of this one.
+        matched: dict[str, str] = {}
+        scope[_ROUTE_KEY] = matched
 
         async def send_with_status(message):
             nonlocal status
@@ -64,8 +77,27 @@ class MetricsMiddleware:
         try:
             await self.app(scope, receive, send_with_status)
         finally:
-            # The router stores the matched route in the (shared) scope.
-            route = getattr(scope.get("route"), "path", None) or "unmatched"
-            REQUEST_DURATION.labels(scope["method"], route, f"{status // 100}xx").observe(
-                time.perf_counter() - start
-            )
+            REQUEST_DURATION.labels(
+                scope["method"], matched.get("template", "unmatched"), f"{status // 100}xx"
+            ).observe(time.perf_counter() - start)
+
+
+async def record_route(request: Request) -> None:
+    """Global dependency: hand the matched route's template to
+    MetricsMiddleware."""
+    matched = request.scope.get(_ROUTE_KEY)
+    route = request.scope.get("route")
+    if matched is None or route is None:
+        return
+    template = getattr(route, "path_format", None) or getattr(route, "path", "")
+    # Routes of an included router may carry their path without the
+    # include prefix (/api/v1, /api): it's whatever precedes the route in
+    # the URL. Rendering the template with the request's own parameters
+    # finds that boundary exactly.
+    try:
+        rendered = template.format(**request.path_params)
+    except (KeyError, IndexError, ValueError):
+        rendered = ""
+    path = request.scope.get("path", "")
+    prefix = path[: -len(rendered)] if rendered and path.endswith(rendered) else ""
+    matched["template"] = prefix + template
