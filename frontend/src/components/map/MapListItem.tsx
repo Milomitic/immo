@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowRight, Building2, ChevronLeft, ChevronRight, ChevronUp, ExternalLink,
   GripHorizontal, Map as MapIcon, MapPin, Maximize2, Minimize2,
@@ -148,9 +148,12 @@ export function MapListItem({ marker: m, mode, highlighted, onToggle, onHover }:
   );
 }
 
-const DEFAULT_HEIGHT = 420;
+// Used until the details are in; then the box fits them (see below).
+const DEFAULT_HEIGHT = 560;
 const MIN_HEIGHT = 200;
 const RESIZE_STEP = 40;
+// Below the facts, show the start of the description: a cue to scroll.
+const DESCRIPTION_PEEK = 48;
 
 function maxHeight(): number {
   return typeof window === "undefined" ? 800 : Math.round(window.innerHeight * 0.8);
@@ -161,11 +164,30 @@ function maxHeight(): number {
 function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => void }) {
   const { data: listing, isLoading, isError } = useListingDetail(id);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  // The opening height, fitted to the content: "Riduci" goes back to it.
+  const [fitHeight, setFitHeight] = useState(DEFAULT_HEIGHT);
   const [photo, setPhoto] = useState(0);
   const drag = useRef<{ startY: number; startHeight: number } | null>(null);
+  const infoEnd = useRef<HTMLDivElement>(null);
+  const userSized = useRef(false);
 
   const clamp = (h: number) => Math.max(MIN_HEIGHT, Math.min(maxHeight(), h));
   const maximized = height >= maxHeight() - 2;
+  const resize = (h: number) => {
+    userSized.current = true;
+    setHeight(clamp(h));
+  };
+
+  // Open tall enough that photo, price, facts and features all show without
+  // scrolling, whatever their number. The gallery has a fixed aspect ratio,
+  // so the layout is final before any image loads; measured before paint,
+  // so there's no jump.
+  useLayoutEffect(() => {
+    if (!listing || !infoEnd.current) return;
+    const fitted = clamp(infoEnd.current.offsetTop + (listing.description ? DESCRIPTION_PEEK : 8));
+    setFitHeight(fitted);
+    if (!userSized.current) setHeight(fitted);
+  }, [listing]);
 
   const photos = listing?.images ?? [];
   const plans = listing?.floor_plans ?? [];
@@ -199,7 +221,7 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
     <div className="px-3 pb-2">
       <div
         style={{ height }}
-        className="overflow-y-auto overscroll-contain rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--background)]"
+        className="relative overflow-y-auto overscroll-contain rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--background)]"
       >
         {isLoading && <div className="p-4 text-sm text-[var(--muted-foreground)] animate-pulse">Caricamento dettagli…</div>}
         {isError && <div className="p-4 text-sm text-[var(--destructive)]">Dettagli non disponibili.</div>}
@@ -207,7 +229,7 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
         {listing && (
           <>
             {gallery.length > 0 && (
-              <div className="relative aspect-[16/10] bg-[var(--muted)]">
+              <div className="relative aspect-[2/1] bg-[var(--muted)]">
                 <img
                   src={imageVariant(gallery[current], "full")}
                   alt={isPlan ? "Planimetria" : `Foto ${current + 1}`}
@@ -297,6 +319,9 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
                 </div>
               )}
 
+              {/* End of the always-visible part (see the fit above). */}
+              <div ref={infoEnd} aria-hidden />
+
               {listing.description && (
                 <p className="text-xs leading-relaxed whitespace-pre-line text-[var(--foreground)]/90">{listing.description}</p>
               )}
@@ -324,6 +349,7 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           drag.current = { startY: e.clientY, startHeight: height };
+          userSized.current = true;
         }}
         onPointerMove={(e) => {
           if (drag.current) setHeight(clamp(drag.current.startHeight + e.clientY - drag.current.startY));
@@ -331,10 +357,10 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
         onPointerUp={() => {
           drag.current = null;
         }}
-        onDoubleClick={() => setHeight(maximized ? DEFAULT_HEIGHT : maxHeight())}
+        onDoubleClick={() => resize(maximized ? fitHeight : maxHeight())}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") setHeight((h) => clamp(h + RESIZE_STEP));
-          else if (e.key === "ArrowUp") setHeight((h) => clamp(h - RESIZE_STEP));
+          if (e.key === "ArrowDown") resize(height + RESIZE_STEP);
+          else if (e.key === "ArrowUp") resize(height - RESIZE_STEP);
           else return;
           e.preventDefault();
         }}
@@ -365,7 +391,7 @@ function ListingQuickLook({ id, onCollapse }: { id: string; onCollapse: () => vo
         )}
         <button
           type="button"
-          onClick={() => setHeight(maximized ? DEFAULT_HEIGHT : maxHeight())}
+          onClick={() => resize(maximized ? fitHeight : maxHeight())}
           className="p-1.5 rounded-[var(--radius-sm)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           aria-label={maximized ? "Riduci l'anteprima" : "Ingrandisci l'anteprima"}
           title={maximized ? "Riduci l'anteprima" : "Ingrandisci l'anteprima"}
