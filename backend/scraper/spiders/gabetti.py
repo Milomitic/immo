@@ -29,7 +29,6 @@ from scraper.items import ListingItem
 from scraper.spiders.base import BaseSpider, SearchParams
 from scraper.utils.html_extract import map_property_type
 
-
 # Matches href="/vendita/{city}/{type}/{id}" and the affitto variant.
 _LISTING_HREF_RE = re.compile(
     r'href="(/(?:vendita|affitto)/[a-z0-9\-]+/[a-z0-9\-]+/\d+)(?:[?#][^"]*)?"'

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { MapPin, Maximize2, BedDouble, Bath, Building2, Camera, Layers } from "lucide-react";
 import type { Listing } from "@/lib/types";
-import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel, timeAgo } from "@/lib/utils";
+import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, floorLabel, isNewListing, roomsLabel } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { PriceChangeBadge } from "@/components/listings/PriceChangeBadge";
 

@@ -1,13 +1,10 @@
 import asyncio
 import random
-from abc import abstractmethod
-from collections.abc import AsyncGenerator
 
 import structlog
-from playwright.async_api import async_playwright, Page, Browser
+from playwright.async_api import Browser, Page, async_playwright
 
-from scraper.items import ListingItem
-from scraper.spiders.base import BaseSpider, SearchParams
+from scraper.spiders.base import BaseSpider
 from scraper.utils.rate_limiter import RateLimiter
 
 logger = structlog.get_logger()

@@ -1,12 +1,11 @@
-import json
 import re
 
 from bs4 import BeautifulSoup
 
+from app.utils.text import clean_area, clean_price
 from scraper.items import ListingItem
-from scraper.spiders.playwright_base import PlaywrightSpider
 from scraper.spiders.base import SearchParams
-from app.utils.text import clean_price, clean_area
+from scraper.spiders.playwright_base import PlaywrightSpider
 
 
 class IdealistaSpider(PlaywrightSpider):

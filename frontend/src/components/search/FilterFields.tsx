@@ -3,6 +3,7 @@
 import { useQueryState, parseAsInteger, parseAsString, parseAsBoolean } from "nuqs";
 import { FilterSection } from "./FilterSection";
 import { cn } from "@/lib/utils";
+import type { ListingSearchParams } from "@/lib/types";
 
 function NumberButton({ value, label, current, onClick }: { value: number; label: string; current: number | null; onClick: (v: number | null) => void }) {
   const active = current === value;
@@ -107,6 +108,39 @@ export function useListingFilters() {
   };
 
   return { values, setters, activeCount, clearAll };
+}
+
+export type ListingFilterValues = ReturnType<typeof useListingFilters>["values"];
+
+/**
+ * The single place that turns sidebar filter state into API params.
+ * /search and /map both spread this, so a filter can't be wired on one
+ * page and forgotten on the other (that's how "Stato immobile" silently
+ * did nothing on /search).
+ */
+export function filtersToParams(v: ListingFilterValues): ListingSearchParams {
+  return {
+    city: v.city || undefined,
+    zone: v.zone || undefined,
+    listing_type: v.listingType || undefined,
+    property_type: v.propertyType || undefined,
+    price_min: v.priceMin || undefined,
+    price_max: v.priceMax || undefined,
+    area_min: v.areaMin || undefined,
+    area_max: v.areaMax || undefined,
+    rooms_min: v.roomsMin || undefined,
+    bathrooms_min: v.bathroomsMin || undefined,
+    floor_min: v.floorMin ?? undefined,
+    floor_max: v.floorMax ?? undefined,
+    energy_class: v.energyClass || undefined,
+    condition: v.condition || undefined,
+    has_elevator: v.hasElevator || undefined,
+    has_balcony: v.hasBalcony || undefined,
+    has_terrace: v.hasTerrace || undefined,
+    has_garage: v.hasGarage || undefined,
+    has_garden: v.hasGarden || undefined,
+    source_portal: v.sourcePortal || undefined,
+  };
 }
 
 interface FilterFieldsProps {

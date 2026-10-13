@@ -43,6 +43,9 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
+# Line length is the formatter's concern; long string literals and
+# comments aren't worth wrapping by hand.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

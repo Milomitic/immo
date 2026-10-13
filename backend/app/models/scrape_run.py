@@ -1,8 +1,8 @@
-from app.database import Base
-from app.models.listing import _now, _uuid
-
 from sqlalchemy import Boolean, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+from app.models.listing import _now, _uuid
 
 
 class ScrapeRun(Base):

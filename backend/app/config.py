@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # gets bumped via `bump_last_seen` so LISTING_INACTIVE_DAYS keeps
     # working.
 
+    # Skip listings first published more than N days ago (0 = keep all).
+    # Off by default: an old listing that's still on sale is still a
+    # listing a buyer cares about, and we're building a history.
+    SCRAPE_MAX_LISTING_AGE_DAYS: int = 0
+
     # Deduplication
     DEDUP_THRESHOLD: float = 0.85
     LISTING_INACTIVE_DAYS: int = 14

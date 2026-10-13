@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { fetchListing } from "@/lib/api";
-import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, listingTypeLabel, floorLabel, conditionLabel, energyClassColor } from "@/lib/utils";
+import type { ListingDetail } from "@/lib/types";
+import { formatPrice, formatArea, portalLabel, portalColor, propertyTypeLabel, floorLabel, conditionLabel, energyClassColor } from "@/lib/utils";
 import { ArrowLeft, CheckCircle2, XCircle, Minus, Search } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
@@ -22,16 +23,18 @@ function CompareContent() {
   const idsParam = searchParams.get("ids");
   const ids = idsParam ? idsParam.split(",").slice(0, 3) : [];
 
-  const queries = ids.map((id) =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useQuery({
+  // useQueries, not useQuery-in-a-loop: the number of ids comes from the
+  // URL and can change between renders, which breaks the rules of hooks.
+  const queries = useQueries({
+    queries: ids.map((id) => ({
       queryKey: ["listing", id],
       queryFn: () => fetchListing(id),
-      enabled: !!id,
-    })
-  );
+    })),
+  });
 
-  const listings = queries.map((q) => q.data).filter(Boolean);
+  const listings = queries
+    .map((q) => q.data)
+    .filter((l): l is ListingDetail => Boolean(l));
   const isLoading = queries.some((q) => q.isLoading);
 
   if (ids.length === 0) {
@@ -63,24 +66,24 @@ function CompareContent() {
     return <Minus className="h-4 w-4 text-[var(--muted-foreground)] mx-auto" />;
   };
 
-  const rows = [
-    { label: "Prezzo", render: (l: any) => <span className="font-bold text-[var(--primary)]">{formatPrice(l.price)}</span> },
-    { label: "Prezzo/m\u00B2", render: (l: any) => l.price_per_sqm ? formatPrice(l.price_per_sqm) : "N/D" },
-    { label: "Superficie", render: (l: any) => l.area_sqm ? formatArea(l.area_sqm) : "N/D" },
-    { label: "Locali", render: (l: any) => l.rooms ?? "N/D" },
-    { label: "Bagni", render: (l: any) => l.bathrooms ?? "N/D" },
-    { label: "Piano", render: (l: any) => l.floor ? floorLabel(l.floor) : "N/D" },
-    { label: "Tipologia", render: (l: any) => propertyTypeLabel(l.property_type) },
-    { label: "Classe energetica", render: (l: any) => l.energy_class ? <Badge size="sm" className={energyClassColor(l.energy_class)}>Classe {l.energy_class}</Badge> : "N/D" },
-    { label: "Stato", render: (l: any) => l.condition ? conditionLabel(l.condition) : "N/D" },
-    { label: "Citta", render: (l: any) => <span className="capitalize">{l.city}</span> },
-    { label: "Portale", render: (l: any) => <Badge size="sm" className={`${portalColor(l.source_portal)} text-white`}>{portalLabel(l.source_portal)}</Badge> },
-    { label: "Fonti", render: (l: any) => l.source_count },
-    { label: "Ascensore", render: (l: any) => <BoolIcon value={l.has_elevator} /> },
-    { label: "Balcone", render: (l: any) => <BoolIcon value={l.has_balcony} /> },
-    { label: "Terrazzo", render: (l: any) => <BoolIcon value={l.has_terrace} /> },
-    { label: "Garage", render: (l: any) => <BoolIcon value={l.has_garage} /> },
-    { label: "Giardino", render: (l: any) => <BoolIcon value={l.has_garden} /> },
+  const rows: { label: string; render: (l: ListingDetail) => ReactNode }[] = [
+    { label: "Prezzo", render: (l) => <span className="font-bold text-[var(--primary)]">{formatPrice(l.price)}</span> },
+    { label: "Prezzo/m\u00B2", render: (l) => l.price_per_sqm ? formatPrice(l.price_per_sqm) : "N/D" },
+    { label: "Superficie", render: (l) => l.area_sqm ? formatArea(l.area_sqm) : "N/D" },
+    { label: "Locali", render: (l) => l.rooms ?? "N/D" },
+    { label: "Bagni", render: (l) => l.bathrooms ?? "N/D" },
+    { label: "Piano", render: (l) => l.floor ? floorLabel(l.floor) : "N/D" },
+    { label: "Tipologia", render: (l) => propertyTypeLabel(l.property_type) },
+    { label: "Classe energetica", render: (l) => l.energy_class ? <Badge size="sm" className={energyClassColor(l.energy_class)}>Classe {l.energy_class}</Badge> : "N/D" },
+    { label: "Stato", render: (l) => l.condition ? conditionLabel(l.condition) : "N/D" },
+    { label: "Citta", render: (l) => <span className="capitalize">{l.city}</span> },
+    { label: "Portale", render: (l) => <Badge size="sm" className={`${portalColor(l.source_portal)} text-white`}>{portalLabel(l.source_portal)}</Badge> },
+    { label: "Fonti", render: (l) => l.source_count },
+    { label: "Ascensore", render: (l) => <BoolIcon value={l.has_elevator} /> },
+    { label: "Balcone", render: (l) => <BoolIcon value={l.has_balcony} /> },
+    { label: "Terrazzo", render: (l) => <BoolIcon value={l.has_terrace} /> },
+    { label: "Garage", render: (l) => <BoolIcon value={l.has_garage} /> },
+    { label: "Giardino", render: (l) => <BoolIcon value={l.has_garden} /> },
   ];
 
   return (

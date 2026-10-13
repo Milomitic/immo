@@ -25,7 +25,6 @@ from scraper.items import ListingItem
 from scraper.spiders.base import BaseSpider, SearchParams
 from scraper.utils.html_extract import map_property_type, parse_int
 
-
 # City slug -> (region slug, province slug). Tecnocasa's URL structure
 # requires the Italian region in the path, which isn't derivable from the
 # city alone. Bari is the project's default; the rest are the main Italian

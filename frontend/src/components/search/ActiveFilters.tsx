@@ -26,8 +26,11 @@ export function ActiveFilters() {
   const [hasGarden, setHasGarden] = useQueryState("has_garden", parseAsBoolean);
   const [sourcePortal, setSourcePortal] = useQueryState("source_portal", parseAsString);
   const [polygon, setPolygon] = useQueryState("polygon", parseAsString);
+  const [q, setQ] = useQueryState("q", parseAsString);
 
   const filters: { label: string; clear: () => void }[] = [];
+
+  if (q) filters.push({ label: `Testo: "${q}"`, clear: () => setQ(null) });
 
   // Polygon chip first — it's the most "physical" filter, easy to
   // forget you have it active when you switch views.

@@ -42,7 +42,6 @@ from scraper.items import ListingItem
 from scraper.spiders.base import BaseSpider, SearchParams
 from scraper.utils.html_extract import map_property_type, parse_italian_date
 
-
 # Known label vocabulary. Detail-panel labels are rendered in ALL CAPS on
 # the page, which is *also* how we discriminate them from prose: the word
 # "prezzo" appears 42 times on a typical listing (CSS class names,
@@ -81,7 +80,7 @@ _KNOWN_LABELS = (
 # Single regex matching any known label as a whole token (case-sensitive,
 # longer labels first so "TIPO PROPRIETÀ" wins over a hypothetical "TIPO").
 _LABEL_TOKEN_RE = re.compile(
-    "(" + "|".join(re.escape(l) for l in sorted(_KNOWN_LABELS, key=len, reverse=True)) + ")"
+    "(" + "|".join(re.escape(lbl) for lbl in sorted(_KNOWN_LABELS, key=len, reverse=True)) + ")"
 )
 
 
@@ -257,6 +256,12 @@ def _hidden_field(soup: BeautifulSoup, name: str) -> str:
     return el.get("value", "") if el else ""
 
 
+# Abort pagination after this many consecutive POST failures — usually
+# means the WebForms session is dead (WAF, cookie rotation, viewstate
+# rejected). Better to stop early than hammer the server.
+_MAX_CONSECUTIVE_POST_FAILURES = 3
+
+
 # Pagination postback target template. ctl01 = page 1, ctl03 = page 2,
 # ctl05 = page 3, ... so for page N use ctl{2N-1:02d}.
 def _postback_target(page: int) -> str:
@@ -403,17 +408,13 @@ class VistocasaSpider(BaseSpider):
             f"{self.portal_name} cerca pag 1/{total_pages} ({len(url_prices)} url)"
         )
 
-        # Abort pagination after this many consecutive POST failures —
-        # usually means the WebForms session is dead (WAF, cookie rotation,
-        # viewstate rejected). Better to stop early than hammer the server.
         consecutive_failures = 0
-        MAX_CONSECUTIVE_FAILURES = 3
 
         for page in range(2, total_pages + 1):
             page_html = await self._post_search(page, viewstate, viewstate_gen)
             if not page_html:
                 consecutive_failures += 1
-                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                if consecutive_failures >= _MAX_CONSECUTIVE_POST_FAILURES:
                     break
                 continue
             consecutive_failures = 0

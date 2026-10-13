@@ -376,7 +376,7 @@ async def run_all_spiders(city: str, listing_type: str) -> None:
         print("Nessun portale abilitato.")
         return
 
-    sys.stderr.write(f"\n=== Immo Scraper ===\n")
+    sys.stderr.write("\n=== Immo Scraper ===\n")
     sys.stderr.write(f"Portali: {', '.join(active)} | Citta: {city} | Tipo: {listing_type}\n\n")
 
     # Phase A: immobiliare first (canonical). Single portal → in-place
@@ -397,7 +397,7 @@ async def run_all_spiders(city: str, listing_type: str) -> None:
             return_exceptions=True,
         )
 
-    sys.stderr.write(f"\nScraping completato.\n")
+    sys.stderr.write("\nScraping completato.\n")
 
 
 async def main(portal: str | None = None, city: str | None = None) -> None:
@@ -409,7 +409,7 @@ async def main(portal: str | None = None, city: str | None = None) -> None:
     listing_type = settings.SCRAPE_DEFAULT_LISTING_TYPE
 
     if portal:
-        sys.stderr.write(f"\n=== Immo Scraper ===\n")
+        sys.stderr.write("\n=== Immo Scraper ===\n")
         sys.stderr.write(f"Portale: {portal} | Citta: {target_city}\n\n")
         await run_spider(portal, target_city, listing_type)
     else:

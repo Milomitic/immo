@@ -4,18 +4,20 @@ from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.listing import Listing
 from app.utils.text import normalize_address
+
+EARTH_RADIUS_M = 6371000
 
 
 def haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Distance in meters between two lat/lng points."""
-    R = 6371000
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lng2 - lng1)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return EARTH_RADIUS_M * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def compute_similarity(
@@ -83,16 +85,18 @@ async def find_duplicate(
     lat: float | None,
     lng: float | None,
     exclude_portal: str | None = None,
-    threshold: float = 0.85,
+    threshold: float | None = None,
 ) -> Listing | None:
     """Find a near-duplicate listing in the DB."""
+    if threshold is None:
+        threshold = settings.DEDUP_THRESHOLD
     normalized_addr = normalize_address(address, city)
 
     query = select(Listing).where(
         Listing.city == city.lower(),
         Listing.listing_type == listing_type,
         Listing.property_type == property_type,
-        Listing.is_active == True,
+        Listing.is_active.is_(True),
     )
 
     if exclude_portal:

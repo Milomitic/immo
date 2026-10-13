@@ -1,6 +1,5 @@
 import re
 
-
 # Italian address abbreviations to full form
 _ADDRESS_REPLACEMENTS = {
     "v.le": "viale",

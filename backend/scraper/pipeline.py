@@ -5,17 +5,15 @@ import structlog
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import async_session
 from app.models.listing import Listing, ListingSource
-from app.models.scrape_run import ScrapeRun
 from app.services.dedup_service import find_duplicate
 from app.utils.text import normalize_address
 from scraper.items import ListingItem
 from scraper.utils.html_extract import clamp_italy_coords, clamp_publication_date
 
 logger = structlog.get_logger()
-
-MAX_LISTING_AGE_DAYS = 60  # Skip listings older than 2 months
 
 # Portal priority for deduplication: lower index = higher priority.
 # When duplicates exist, the highest-priority portal becomes the canonical listing.
@@ -184,27 +182,23 @@ def _portal_rank(portal: str) -> int:
 
 
 def _is_too_old(publication_date: str | None) -> bool:
-    """Check if a listing is older than MAX_LISTING_AGE_DAYS."""
-    if not publication_date:
-        return False  # If no date, accept it
-    try:
-        pub = datetime.fromisoformat(publication_date.replace("Z", "+00:00"))
-        cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_LISTING_AGE_DAYS)
-        return pub < cutoff
-    except (ValueError, TypeError):
+    """True when the listing was published more than
+    ``SCRAPE_MAX_LISTING_AGE_DAYS`` ago. 0 (the default) disables the cut.
+
+    Spiders emit date-only strings ("2026-04-08"), which ``fromisoformat``
+    parses as *naive* datetimes; comparing those with an aware cutoff
+    raised TypeError, silently swallowed — so this filter never fired.
+    We compare dates instead.
+    """
+    max_age = settings.SCRAPE_MAX_LISTING_AGE_DAYS
+    if not publication_date or max_age <= 0:
         return False
-
-
-async def process_item(item: ListingItem, scrape_run_id: str) -> str:
-    """Process a scraped item: upsert or deduplicate. Returns 'new', 'updated', 'duplicate', or 'skipped'."""
-    if _is_too_old(item.publication_date):
-        logger.debug("skipped_old_listing", portal=item.source_portal, source_id=item.source_id, date=item.publication_date)
-        return "skipped"
-
-    async with async_session() as db:
-        result = await _process_single(db, item)
-        await db.commit()
-        return result
+    try:
+        pub = datetime.fromisoformat(publication_date.replace("Z", "+00:00")).date()
+    except ValueError:
+        return False
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age)).date()
+    return pub < cutoff
 
 
 async def _process_single(db: AsyncSession, item: ListingItem) -> str:

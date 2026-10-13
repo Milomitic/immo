@@ -1,5 +1,3 @@
-import json
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +14,7 @@ from app.services.listing_service import (
     get_listing_detail,
     get_listing_markers,
     get_similar_listings,
+    listing_to_response,
     search_listings,
 )
 
@@ -140,66 +139,9 @@ async def get_listing(listing_id: str, db: AsyncSession = Depends(get_db)) -> Li
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    sources = [
-        ListingSourceResponse(
-            id=s.id,
-            source_portal=s.source_portal,
-            source_id=s.source_id,
-            source_url=s.source_url,
-            price_on_source=s.price_on_source,
-            first_seen_at=s.first_seen_at,
-            last_seen_at=s.last_seen_at,
-            is_active=s.is_active,
-        )
-        for s in listing.sources
-    ]
-
-    return ListingDetailResponse(
-        id=listing.id,
-        title=listing.title,
-        description=listing.description,
-        price=listing.price,
-        price_previous=listing.price_previous,
-        price_changed_at=listing.price_changed_at,
-        price_per_sqm=listing.price_per_sqm,
-        area_sqm=listing.area_sqm,
-        rooms=listing.rooms,
-        bedrooms=listing.bedrooms,
-        bathrooms=listing.bathrooms,
-        floor=listing.floor,
-        total_floors=listing.total_floors,
-        address=listing.address,
-        city=listing.city,
-        zone=listing.zone,
-        province=listing.province,
-        lat=listing.lat,
-        lng=listing.lng,
-        images=json.loads(listing.images) if listing.images else [],
-        floor_plans=json.loads(listing.floor_plans) if listing.floor_plans else [],
-        listing_url=listing.listing_url,
-        source_portal=listing.source_portal,
-        source_id=listing.source_id,
-        energy_class=listing.energy_class,
-        property_type=listing.property_type,
-        listing_type=listing.listing_type,
-        condition=listing.condition,
-        heating=listing.heating,
-        has_elevator=listing.has_elevator,
-        has_balcony=listing.has_balcony,
-        has_terrace=listing.has_terrace,
-        has_garage=listing.has_garage,
-        has_garden=listing.has_garden,
-        condominium_fees=listing.condominium_fees,
-        year_built=listing.year_built,
-        publication_date=listing.publication_date,
-        created_at=listing.created_at,
-        updated_at=listing.updated_at,
-        first_seen_at=listing.first_seen_at,
-        last_seen_at=listing.last_seen_at,
-        is_active=listing.is_active,
-        source_count=len(sources),
-        sources=sources,
-    )
+    sources = [ListingSourceResponse.model_validate(s) for s in listing.sources]
+    base = listing_to_response(listing)
+    return ListingDetailResponse(**base.model_dump(), sources=sources)
 
 
 @router.get("/{listing_id}/similar", response_model=list[ListingResponse])
@@ -212,27 +154,4 @@ async def similar_listings(
         raise HTTPException(status_code=404, detail="Listing not found")
 
     similar = await get_similar_listings(db, listing)
-    return [
-        ListingResponse(
-            id=l.id, title=l.title, description=l.description,
-            price=l.price, price_previous=l.price_previous, price_changed_at=l.price_changed_at,
-            price_per_sqm=l.price_per_sqm, area_sqm=l.area_sqm,
-            rooms=l.rooms, bedrooms=l.bedrooms, bathrooms=l.bathrooms,
-            floor=l.floor, total_floors=l.total_floors,
-            address=l.address, city=l.city, zone=l.zone, province=l.province,
-            lat=l.lat, lng=l.lng,
-            images=json.loads(l.images) if l.images else [],
-            floor_plans=json.loads(l.floor_plans) if l.floor_plans else [],
-            listing_url=l.listing_url, source_portal=l.source_portal, source_id=l.source_id,
-            energy_class=l.energy_class, property_type=l.property_type,
-            listing_type=l.listing_type, condition=l.condition, heating=l.heating,
-            has_elevator=l.has_elevator, has_balcony=l.has_balcony,
-            has_terrace=l.has_terrace, has_garage=l.has_garage, has_garden=l.has_garden,
-            condominium_fees=l.condominium_fees, year_built=l.year_built,
-            publication_date=l.publication_date,
-            created_at=l.created_at, updated_at=l.updated_at,
-            first_seen_at=l.first_seen_at, last_seen_at=l.last_seen_at,
-            is_active=l.is_active, source_count=1,
-        )
-        for l in similar
-    ]
+    return [listing_to_response(s) for s in similar]

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -16,13 +16,13 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     # Total and active listings
     total = (await db.execute(select(func.count(Listing.id)))).scalar() or 0
     active = (
-        await db.execute(select(func.count(Listing.id)).where(Listing.is_active == True))
+        await db.execute(select(func.count(Listing.id)).where(Listing.is_active.is_(True)))
     ).scalar() or 0
 
     # By portal
     portal_result = await db.execute(
         select(Listing.source_portal, func.count(Listing.id))
-        .where(Listing.is_active == True)
+        .where(Listing.is_active.is_(True))
         .group_by(Listing.source_portal)
     )
     by_portal = {row[0]: row[1] for row in portal_result.all()}
@@ -30,7 +30,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     # By city (top 20)
     city_result = await db.execute(
         select(Listing.city, func.count(Listing.id))
-        .where(Listing.is_active == True)
+        .where(Listing.is_active.is_(True))
         .group_by(Listing.city)
         .order_by(func.count(Listing.id).desc())
         .limit(20)
@@ -40,7 +40,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     # Average price/sqm by city (top 20 cities)
     avg_result = await db.execute(
         select(Listing.city, func.avg(Listing.price_per_sqm))
-        .where(Listing.is_active == True, Listing.price_per_sqm.isnot(None))
+        .where(Listing.is_active.is_(True), Listing.price_per_sqm.isnot(None))
         .group_by(Listing.city)
         .order_by(func.count(Listing.id).desc())
         .limit(20)

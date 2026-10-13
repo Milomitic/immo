@@ -1,9 +1,10 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useQueryState, parseAsInteger, parseAsString, parseAsBoolean } from "nuqs";
+import { useQueryState, parseAsInteger, parseAsString } from "nuqs";
 import { useListings } from "@/hooks/useListings";
+import { filtersToParams, useListingFilters } from "@/components/search/FilterFields";
 import { ListingCard } from "@/components/listings/ListingCard";
 import { ListingCardList } from "@/components/listings/ListingCardList";
 import { FilterSidebar } from "@/components/search/FilterSidebar";
@@ -22,27 +23,8 @@ export default function SearchPage() {
 }
 
 function SearchContent() {
+  const { values } = useListingFilters();
   const [q, setQ] = useQueryState("q", parseAsString);
-  const [city] = useQueryState("city", parseAsString);
-  const [zone] = useQueryState("zone", parseAsString);
-  const [listingType] = useQueryState("listing_type", parseAsString);
-  const [propertyType] = useQueryState("property_type", parseAsString);
-  const [priceMin] = useQueryState("price_min", parseAsInteger);
-  const [priceMax] = useQueryState("price_max", parseAsInteger);
-  const [areaMin] = useQueryState("area_min", parseAsInteger);
-  const [areaMax] = useQueryState("area_max", parseAsInteger);
-  const [roomsMin] = useQueryState("rooms_min", parseAsInteger);
-  const [bathroomsMin] = useQueryState("bathrooms_min", parseAsInteger);
-  const [floorMin] = useQueryState("floor_min", parseAsInteger);
-  const [floorMax] = useQueryState("floor_max", parseAsInteger);
-  const [energyClass] = useQueryState("energy_class", parseAsString);
-  const [condition] = useQueryState("condition", parseAsString);
-  const [hasElevator] = useQueryState("has_elevator", parseAsBoolean);
-  const [hasBalcony] = useQueryState("has_balcony", parseAsBoolean);
-  const [hasTerrace] = useQueryState("has_terrace", parseAsBoolean);
-  const [hasGarage] = useQueryState("has_garage", parseAsBoolean);
-  const [hasGarden] = useQueryState("has_garden", parseAsBoolean);
-  const [sourcePortal] = useQueryState("source_portal", parseAsString);
   const [sort] = useQueryState("sort", parseAsString);
   const [page, setPage] = useQueryState("page", parseAsInteger);
   const [pageSizeParam] = useQueryState("page_size", parseAsInteger);
@@ -71,27 +53,22 @@ function SearchContent() {
     });
   };
 
+  const filterParams = filtersToParams(values);
+
+  // Any filter change sends the user back to page 1 — otherwise sitting on
+  // page 5 and narrowing the filters shows an empty "Nessun risultato".
+  const filterSignature = JSON.stringify([filterParams, q, polygonStr, sort, currentPageSize]);
+  const prevSignature = useRef(filterSignature);
+  useEffect(() => {
+    if (prevSignature.current !== filterSignature) {
+      prevSignature.current = filterSignature;
+      setPage(null);
+    }
+  }, [filterSignature, setPage]);
+
   const params: ListingSearchParams = {
+    ...filterParams,
     q: q || undefined,
-    city: city || undefined,
-    zone: zone || undefined,
-    listing_type: listingType || undefined,
-    property_type: propertyType || undefined,
-    price_min: priceMin || undefined,
-    price_max: priceMax || undefined,
-    area_min: areaMin || undefined,
-    area_max: areaMax || undefined,
-    rooms_min: roomsMin || undefined,
-    bathrooms_min: bathroomsMin || undefined,
-    floor_min: floorMin ?? undefined,
-    floor_max: floorMax ?? undefined,
-    energy_class: energyClass || undefined,
-    has_elevator: hasElevator || undefined,
-    has_balcony: hasBalcony || undefined,
-    has_terrace: hasTerrace || undefined,
-    has_garage: hasGarage || undefined,
-    has_garden: hasGarden || undefined,
-    source_portal: sourcePortal || undefined,
     polygon: polygonStr || undefined,
     sort: sort || "newest",
     page: currentPage,
@@ -109,8 +86,8 @@ function SearchContent() {
         </Link>
         <span>/</span>
         <span className="text-[var(--foreground)]">
-          {listingType === "rent" ? "Affitto" : "Vendita"}
-          {city ? ` a ${city.charAt(0).toUpperCase() + city.slice(1)}` : ""}
+          {values.listingType === "rent" ? "Affitto" : "Vendita"}
+          {values.city ? ` a ${values.city.charAt(0).toUpperCase() + values.city.slice(1)}` : ""}
         </span>
       </nav>
 

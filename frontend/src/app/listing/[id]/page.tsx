@@ -3,9 +3,9 @@
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, MapPin, Maximize2, BedDouble, Bath, Building2,
+  MapPin, Maximize2, BedDouble, Bath, Building2,
   Layers, ExternalLink, ChevronLeft, ChevronRight, Car, Trees,
-  Fence, Home, Zap, Expand, Map as MapIcon,
+  Fence, Home, Expand, Map as MapIcon,
 } from "lucide-react";
 import { useListingDetail, useSimilarListings } from "@/hooks/useListings";
 import { formatPrice, formatArea, portalLabel, portalColor, publishedAgo, propertyTypeLabel, listingTypeLabel, floorLabel, energyClassColor, conditionLabel, seenAgo } from "@/lib/utils";

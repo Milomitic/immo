@@ -1,11 +1,11 @@
 import json
 import math
 
-from sqlalchemy import cast, func, Integer as SAInteger, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.listing import Listing, ListingSource
+from app.models.listing import Listing
 from app.schemas.listing import (
     ListingMarker,
     ListingMarkersResponse,
@@ -15,7 +15,9 @@ from app.schemas.listing import (
 )
 
 
-def _listing_to_response(listing: Listing) -> ListingResponse:
+def listing_to_response(listing: Listing) -> ListingResponse:
+    """The one ORM → API mapper. Callers must eager-load ``sources``
+    (selectinload) — a lazy load inside an async session raises."""
     return ListingResponse(
         id=listing.id,
         title=listing.title,
@@ -68,7 +70,7 @@ def _apply_listing_filters(query, params: ListingSearchParams):
     markers endpoint. Every WHERE clause derived from a search param lives
     here so both endpoints return consistent result sets.
     """
-    query = query.where(Listing.is_active == True)
+    query = query.where(Listing.is_active.is_(True))
 
     # Full-text search via FTS5
     if params.q:
@@ -283,13 +285,17 @@ async def search_listings(db: AsyncSession, params: ListingSearchParams) -> Pagi
         # because the bbox over-counts diagonal corners.
         result = await db.execute(query)
         all_rows = result.scalars().unique().all()
-        filtered = [l for l in all_rows if l.lat is not None and l.lng is not None and point_in_polygon(l.lat, l.lng, poly)]
+        filtered = [
+            row for row in all_rows
+            if row.lat is not None and row.lng is not None
+            and point_in_polygon(row.lat, row.lng, poly)
+        ]
         total = len(filtered)
         offset = (params.page - 1) * params.page_size
         listings = filtered[offset : offset + params.page_size]
 
     return PaginatedListings(
-        items=[_listing_to_response(l) for l in listings],
+        items=[listing_to_response(row) for row in listings],
         total=total,
         page=params.page,
         page_size=params.page_size,
@@ -391,9 +397,10 @@ async def get_listing_detail(db: AsyncSession, listing_id: str) -> Listing | Non
 async def get_similar_listings(db: AsyncSession, listing: Listing, limit: int = 6) -> list[Listing]:
     query = (
         select(Listing)
+        .options(selectinload(Listing.sources))
         .where(
             Listing.id != listing.id,
-            Listing.is_active == True,
+            Listing.is_active.is_(True),
             Listing.city == listing.city,
             Listing.listing_type == listing.listing_type,
             Listing.property_type == listing.property_type,

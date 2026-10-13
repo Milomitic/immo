@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
+from app.api.listings import router as listings_router
+from app.api.scrape import router as scrape_router
+from app.api.stats import router as stats_router
 from app.database import init_db
 from app.utils.logging import setup_logging
 
@@ -29,11 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Import and include routers
-from app.api.listings import router as listings_router
-from app.api.scrape import router as scrape_router
-from app.api.stats import router as stats_router
 
 app.include_router(listings_router)
 app.include_router(scrape_router)

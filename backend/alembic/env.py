@@ -1,13 +1,13 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from app.database import Base
 from app.models.listing import Listing, ListingSource  # noqa: F401
-from app.models.scrape_run import ScrapeRun, Favorite, SearchAlert  # noqa: F401
+from app.models.scrape_run import Favorite, ScrapeRun, SearchAlert  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

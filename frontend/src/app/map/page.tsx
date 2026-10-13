@@ -9,7 +9,7 @@ import { formatArea, formatPrice, roomsLabel } from "@/lib/utils";
 import { Building2, List as ListIcon, MapPin, Pencil, X, Check } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import type { ListingSearchParams } from "@/lib/types";
-import { useListingFilters } from "@/components/search/FilterFields";
+import { filtersToParams, useListingFilters } from "@/components/search/FilterFields";
 import { MapFilters } from "@/components/map/MapFilters";
 import { ActiveFilters } from "@/components/search/ActiveFilters";
 
@@ -60,6 +60,7 @@ export default function MapPage() {
 
 function MapPageContent() {
   const { values, setters } = useListingFilters();
+  const [q] = useQueryState("q", parseAsString);
   const [bbox, setBbox] = useQueryState("bbox", parseAsString);
   const [polygonStr, setPolygonStr] = useQueryState("polygon", parseAsString);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -121,26 +122,8 @@ function MapPageContent() {
   }, [drawingMode, handleCancelDrawing, handleFinishDrawing]);
 
   const params: ListingSearchParams & { limit: number } = {
-    city: values.city || undefined,
-    zone: values.zone || undefined,
-    listing_type: values.listingType || undefined,
-    property_type: values.propertyType || undefined,
-    price_min: values.priceMin || undefined,
-    price_max: values.priceMax || undefined,
-    area_min: values.areaMin || undefined,
-    area_max: values.areaMax || undefined,
-    rooms_min: values.roomsMin || undefined,
-    bathrooms_min: values.bathroomsMin || undefined,
-    floor_min: values.floorMin ?? undefined,
-    floor_max: values.floorMax ?? undefined,
-    energy_class: values.energyClass || undefined,
-    condition: values.condition || undefined,
-    has_elevator: values.hasElevator || undefined,
-    has_balcony: values.hasBalcony || undefined,
-    has_terrace: values.hasTerrace || undefined,
-    has_garage: values.hasGarage || undefined,
-    has_garden: values.hasGarden || undefined,
-    source_portal: values.sourcePortal || undefined,
+    ...filtersToParams(values),
+    q: q || undefined,
     // When a polygon is set, send only the polygon — bbox would over-
     // include and the server would have to filter it twice. The polygon's
     // own bounding box is computed server-side as a SQL pre-filter.
