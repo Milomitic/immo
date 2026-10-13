@@ -8,7 +8,7 @@ from app.models.scrape_run import ScrapeRun
 from app.schemas.scrape import ScrapeRunResponse
 from app.schemas.stats import StatsResponse
 
-router = APIRouter(prefix="/api/stats", tags=["stats"])
+router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 @router.get("", response_model=StatsResponse)

@@ -23,6 +23,7 @@ async def session_factory(tmp_path, monkeypatch):
     autouse, no test can reach ``data/immo.db`` even by accident.
     """
     engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}")
+    database.apply_sqlite_pragmas(engine)  # same FK enforcement as production
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -33,6 +34,20 @@ async def session_factory(tmp_path, monkeypatch):
 
     yield factory
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def no_real_subprocess(monkeypatch):
+    """A spawned scraper wouldn't inherit our DB patching and would write to
+    the real data/immo.db. Tests must stub launch_scrape; this makes any
+    leak fail loudly instead of silently scraping."""
+    import app.services.scrape_service as svc
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError(f"tests must not spawn processes: {args!r}")
+
+    monkeypatch.setattr(svc.subprocess, "Popen", _forbidden)
+    monkeypatch.setattr(svc, "_last_launch_monotonic", None)
 
 
 @pytest.fixture

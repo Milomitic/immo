@@ -32,9 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(listings_router)
-app.include_router(scrape_router)
-app.include_router(stats_router)
+_ROUTERS = (listings_router, scrape_router, stats_router)
+
+# /api/v1 is the canonical, documented API. /api is kept as an unversioned
+# alias so older clients and bookmarked URLs keep working; it's hidden from
+# the OpenAPI schema to steer new code to v1.
+for _router in _ROUTERS:
+    app.include_router(_router, prefix="/api/v1")
+    app.include_router(_router, prefix="/api", include_in_schema=False)
 
 
 @app.get("/health")

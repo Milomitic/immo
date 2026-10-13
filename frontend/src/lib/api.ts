@@ -9,9 +9,14 @@ import type {
   Listing,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_ROOT = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1`;
 
-class ApiError extends Error {
+// Optional guard token for mutating endpoints (backend ADMIN_TOKEN). It ends
+// up in the browser bundle, so it only keeps strangers out of a LAN/tunnel
+// deployment — it is not user authentication.
+const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN;
+
+export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
     super(message);
@@ -20,64 +25,63 @@ class ApiError extends Error {
 }
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  // Only send Content-Type with a body: on a GET it makes the request
+  // "non-simple" and costs a CORS preflight round-trip every time.
+  if (init?.body) headers["Content-Type"] = "application/json";
+  if (ADMIN_TOKEN && init?.method && init.method !== "GET") headers["X-Admin-Token"] = ADMIN_TOKEN;
 
+  const res = await fetch(`${API_ROOT}${path}`, { ...init, headers });
   if (!res.ok) {
-    throw new ApiError(res.status, `API error: ${res.status}`);
+    let detail = `Errore API ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // non-JSON error body: keep the generic message
+    }
+    throw new ApiError(res.status, detail);
   }
-
   return res.json();
 }
 
-export async function fetchListings(params: ListingSearchParams): Promise<PaginatedListings> {
-  const searchParams = new URLSearchParams();
-
+function toQuery(params: object): string {
+  const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
-      searchParams.set(key, String(value));
-    }
+    if (value !== undefined && value !== null && value !== "") qs.set(key, String(value));
   }
+  return qs.toString();
+}
 
-  return fetchApi<PaginatedListings>(`/api/listings?${searchParams}`);
+export async function fetchListings(params: ListingSearchParams): Promise<PaginatedListings> {
+  return fetchApi<PaginatedListings>(`/listings?${toQuery(params)}`);
 }
 
 export async function fetchMapMarkers(
   params: ListingSearchParams & { limit?: number },
 ): Promise<ListingMarkersResponse> {
-  const searchParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
-      searchParams.set(key, String(value));
-    }
-  }
-  return fetchApi<ListingMarkersResponse>(`/api/listings/map?${searchParams}`);
+  return fetchApi<ListingMarkersResponse>(`/listings/map?${toQuery(params)}`);
 }
 
 export async function fetchListing(id: string): Promise<ListingDetail> {
-  return fetchApi<ListingDetail>(`/api/listings/${id}`);
+  return fetchApi<ListingDetail>(`/listings/${id}`);
 }
 
 export async function fetchSimilarListings(id: string): Promise<Listing[]> {
-  return fetchApi<Listing[]>(`/api/listings/${id}/similar`);
+  return fetchApi<Listing[]>(`/listings/${id}/similar`);
 }
 
 export async function fetchStats(): Promise<Stats> {
-  return fetchApi<Stats>(`/api/stats`);
+  return fetchApi<Stats>(`/stats`);
 }
 
 export async function triggerScrape(portal: string = "all", city?: string): Promise<ScrapeTriggerResponse> {
-  return fetchApi<ScrapeTriggerResponse>(`/api/scrape/trigger`, {
+  return fetchApi<ScrapeTriggerResponse>(`/scrape/trigger`, {
     method: "POST",
     body: JSON.stringify({ portal, ...(city ? { city } : {}) }),
   });
 }
 
 export async function fetchScrapeStatus(): Promise<ScrapeStatus> {
-  return fetchApi<ScrapeStatus>(`/api/scrape/status`);
+  return fetchApi<ScrapeStatus>(`/scrape/status`);
 }

@@ -37,25 +37,28 @@ export function useTriggerScrape() {
   return useMutation({
     mutationFn: ({ portal = "all", city }: { portal?: string; city?: string }) =>
       triggerScrape(portal, city),
-    onMutate: () => {
-      qc.setQueryData<ScrapeStatus>(STATUS_KEY, (prev) => ({
-        ...(prev ?? {
-          is_running: false,
-          is_stale: false,
-          started_at: null,
-          finished_at: null,
-          seconds_since_last_progress: null,
-          progress_done: 0,
-          progress_total: 0,
-          phase: "search",
-          runs: [],
-        }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: STATUS_KEY });
+      const previous = qc.getQueryData<ScrapeStatus>(STATUS_KEY);
+      qc.setQueryData<ScrapeStatus>(STATUS_KEY, {
         is_running: true,
         is_stale: false,
-        phase: "search",
         started_at: new Date().toISOString(),
         finished_at: null,
-      }));
+        seconds_since_last_progress: null,
+        progress_done: 0,
+        progress_total: 0,
+        phase: "search",
+        // The previous job's runs would show up as pills in the new toast.
+        runs: [],
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      // 409 (already running), 401 (token) or a network error: put back
+      // what the server last told us, then re-sync.
+      if (context?.previous) qc.setQueryData(STATUS_KEY, context.previous);
+      qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
     onSuccess: () => {
       // Refetch quickly a few times to catch the freshly-inserted run row.

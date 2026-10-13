@@ -1,127 +1,101 @@
-"""Scrape orchestration endpoints — start a scrape from the UI and poll
-its progress for the "scan-style" toast on the homepage.
+"""Scrape orchestration: start a scrape from the UI, poll its progress for
+the homepage toast, and inspect what went wrong.
 
-Heavy work runs as a FastAPI BackgroundTask (an asyncio task on the
-same event loop, since uvicorn drives async). One scrape ≈ tens of
-minutes for a full city; the response returns 202 immediately and the
-ticker inside ``scraper.runner.run_spider`` keeps the DB row updated
-for the polling status endpoint.
+The scrape itself runs as a detached ``python -m scraper.runner`` process
+(see app.services.scrape_service.launch_scrape) and reports through the
+shared DB, so API restarts never interrupt it.
 """
 
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_admin
 from app.config import settings
-from app.models.scrape_run import ScrapeRun
+from app.models.scrape_run import ScrapeError, ScrapeRun
 from app.schemas.scrape import (
+    ScrapeErrorResponse,
     ScrapeRunResponse,
     ScrapeStatusResponse,
     ScrapeTriggerRequest,
     ScrapeTriggerResponse,
 )
+from app.services.scrape_service import (
+    STALE_AFTER,
+    enabled_portals,
+    launch_scrape,
+    reap_orphaned_runs,
+    scrape_in_progress,
+)
 
-router = APIRouter(prefix="/api/scrape", tags=["scrape"])
+router = APIRouter(prefix="/scrape", tags=["scrape"])
 
-# Window used to group per-portal runs into one logical "job" — anything
-# started within the last hour is considered part of the current job
-# (cf. the "latest batch" pattern in finance-alert's scan-status).
+# Only runs started within this window are candidates for "the current job".
 JOB_WINDOW = timedelta(hours=1)
-# Runs started within this window of the newest run belong to the same
-# logical job. A scrape spawns all its per-portal runs within ~1s, so a
-# few minutes is a safe cluster boundary that won't merge two jobs.
+# Legacy rows without job_id: runs started within this window of the newest
+# one are treated as the same job.
 JOB_CLUSTER = timedelta(minutes=3)
-# Heartbeat threshold: a run with no progress update older than this is
-# flagged as stale (worker died, network stuck, etc.).
-STALE_AFTER = timedelta(seconds=120)
 
-# Phase ordering — we surface the "least advanced" phase across portals
-# so the UI shows the bottleneck (e.g. some are still searching while
-# others moved to fetch).
+# We surface the *least advanced* phase across portals — it's what
+# dominates the remaining wait.
 _PHASE_ORDER = {"search": 0, "fetch": 1, "done": 2, "failed": 3}
 
 
-@router.post("/trigger", response_model=ScrapeTriggerResponse, status_code=202)
-async def trigger_scrape(request: ScrapeTriggerRequest) -> ScrapeTriggerResponse:
-    """Kick off a scrape as a detached subprocess and return immediately.
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
-    We launch ``python -m scraper.runner`` rather than a FastAPI
-    BackgroundTask: a BackgroundTask lives inside the uvicorn process
-    and dies the moment the API restarts (dev reloads, deploys). A
-    detached subprocess keeps running and writes its progress to the
-    shared SQLite DB via the heartbeat ticker — the status endpoint
-    reads that, so the UI stays accurate across API restarts.
 
-    Defaults: ``portal="all"`` runs every enabled portal; ``city``
-    falls back to ``SCRAPE_DEFAULT_CITY`` (bari).
-    """
-    from scraper.runner import SPIDERS
+@router.post(
+    "/trigger",
+    response_model=ScrapeTriggerResponse,
+    status_code=202,
+    dependencies=[Depends(require_admin)],
+)
+async def trigger_scrape(
+    request: ScrapeTriggerRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ScrapeTriggerResponse:
+    """Launch a scrape and return immediately (202). 409 if one is already
+    running — two concurrent jobs would double the load on every portal and
+    fight over the same rows."""
+    from scraper.runner import SPIDERS  # heavy import (curl_cffi): keep lazy
+
+    await reap_orphaned_runs(db)
+    if await scrape_in_progress(db):
+        raise HTTPException(status_code=409, detail="Una scansione è già in corso")
 
     city = (request.city or settings.SCRAPE_DEFAULT_CITY).lower()
-
     if request.portal == "all":
-        portals = list(SPIDERS.keys())
-        args = [sys.executable, "-m", "scraper.runner", "--city", city]
-    else:
-        if request.portal not in SPIDERS:
-            return ScrapeTriggerResponse(
-                accepted=False,
-                portals=[],
-                city=city,
-                started_at=datetime.now(timezone.utc).isoformat(),
-                message=f"Portale sconosciuto: {request.portal}",
-            )
+        portals = [p for p in enabled_portals() if p in SPIDERS]
+        launch_scrape(city)
+    elif request.portal in SPIDERS:
         portals = [request.portal]
-        args = [
-            sys.executable, "-m", "scraper.runner",
-            "--portal", request.portal, "--city", city,
-        ]
-
-    # backend/ is the cwd that makes `-m scraper.runner` resolve.
-    backend_dir = Path(__file__).resolve().parents[2]
-    creationflags = 0
-    if sys.platform == "win32":
-        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP — survives the
-        # parent (uvicorn) being killed/reloaded.
-        creationflags = 0x00000008 | 0x00000200
-
-    subprocess.Popen(
-        args,
-        cwd=str(backend_dir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        creationflags=creationflags,
-        close_fds=True,
-    )
+        launch_scrape(city, request.portal)
+    else:
+        raise HTTPException(status_code=422, detail=f"Portale sconosciuto: {request.portal}")
 
     return ScrapeTriggerResponse(
         accepted=True,
         portals=portals,
         city=city,
         started_at=datetime.now(timezone.utc).isoformat(),
-        message=f"Scrape avviato per {', '.join(portals)}.",
+        message=f"Scansione avviata per {', '.join(portals)}.",
     )
 
 
 @router.get("/status", response_model=ScrapeStatusResponse)
 async def scrape_status(db: AsyncSession = Depends(get_db)) -> ScrapeStatusResponse:
-    """Aggregate the *current* scrape job's progress.
+    """Aggregate progress of the current job (all per-portal runs sharing
+    the most recent ``job_id``) into one bar with one ETA."""
+    await reap_orphaned_runs(db)
 
-    A job = the cluster of per-portal runs kicked off together. We can't
-    just take "everything in the last hour" because a killed job and a
-    fresh one would be conflated (orphaned failed rows would drag the
-    aggregate). Instead: find the most-recent run, then include only the
-    runs whose ``started_at`` is within JOB_CLUSTER of it. A real job
-    spawns its 6+ runs within the same second, so a few-minute window
-    isolates it cleanly from anything that ran before.
-    """
     cutoff = (datetime.now(timezone.utc) - JOB_WINDOW).isoformat()
     recent = (
         await db.execute(
@@ -133,98 +107,86 @@ async def scrape_status(db: AsyncSession = Depends(get_db)) -> ScrapeStatusRespo
 
     if not recent:
         return ScrapeStatusResponse(
-            is_running=False,
-            is_stale=False,
-            progress_done=0,
-            progress_total=0,
-            runs=[],
+            is_running=False, is_stale=False, progress_done=0, progress_total=0, runs=[]
         )
 
-    # Group by the most-recent job_id. Every per-portal run of a single
-    # `run_all_spiders` invocation shares one job_id, so this isolates
-    # the current job from any prior (incl. orphaned) runs cleanly —
-    # immune to how far apart in time the jobs were triggered.
     newest = max(recent, key=lambda r: r.started_at or "")
-    target_job = newest.job_id
-    if target_job:
-        rows = [r for r in recent if r.job_id == target_job]
+    if newest.job_id:
+        rows = [r for r in recent if r.job_id == newest.job_id]
     else:
-        # Legacy rows predating job_id — fall back to the time cluster.
-        try:
-            newest_dt = datetime.fromisoformat((newest.started_at or "").replace("Z", "+00:00"))
-        except ValueError:
-            newest_dt = datetime.now(timezone.utc)
-        floor = newest_dt - JOB_CLUSTER
-        rows = [
-            r for r in recent
-            if r.started_at
-            and datetime.fromisoformat(r.started_at.replace("Z", "+00:00")) >= floor
-        ]
+        floor = (_parse_ts(newest.started_at) or datetime.now(timezone.utc)) - JOB_CLUSTER
+        rows = [r for r in recent if (_parse_ts(r.started_at) or floor) >= floor]
 
     now = datetime.now(timezone.utc)
-    is_running = any(r.status == "running" for r in rows)
-    started_at = min((r.started_at for r in rows if r.started_at), default=None)
-    finished_candidates = [r.finished_at for r in rows]
-    finished_at = (
-        max(finished_candidates) if all(f is not None for f in finished_candidates) else None
-    )
+    running = [r for r in rows if r.status == "running"]
+    heartbeats = {r.id: _parse_ts(r.last_progress_at) for r in running}
+    fresh = [r for r in running if heartbeats[r.id] and now - heartbeats[r.id] <= STALE_AFTER]
+    # A running row with a stale heartbeat is a hung worker: still "running"
+    # (the reaper only closes it after ORPHAN_AFTER) but flagged as stale.
+    is_running = bool(running)
+    is_stale = bool(running) and len(fresh) < len(running)
 
-    progress_done = sum(r.progress_done or 0 for r in rows)
-    progress_total = sum(r.progress_total or 0 for r in rows)
+    last_hb = max((ts for ts in (_parse_ts(r.last_progress_at) for r in rows) if ts), default=None)
+    seconds_since = max(0, int((now - last_hb).total_seconds())) if last_hb else None
 
-    # Most-recent heartbeat across runs. Stale if any *running* row's
-    # heartbeat is older than STALE_AFTER.
-    last_progress_at = max(
-        (r.last_progress_at for r in rows if r.last_progress_at),
-        default=None,
-    )
-    seconds_since: int | None = None
-    is_stale = False
-    if last_progress_at:
-        try:
-            last_dt = datetime.fromisoformat(last_progress_at.replace("Z", "+00:00"))
-            seconds_since = max(0, int((now - last_dt).total_seconds()))
-        except ValueError:
-            seconds_since = None
-    if is_running:
-        running_runs = [r for r in rows if r.status == "running" and r.last_progress_at]
-        for r in running_runs:
-            try:
-                last_dt = datetime.fromisoformat(r.last_progress_at.replace("Z", "+00:00"))
-                if (now - last_dt) > STALE_AFTER:
-                    is_stale = True
-                    break
-            except ValueError:
-                continue
-
-    # Surface the *least-advanced* phase across running portals — that's
-    # what dominates the wait time.
-    running_phases = [r.phase for r in rows if r.status == "running" and r.phase]
+    running_phases = [r.phase for r in running if r.phase]
     if running_phases:
         phase = min(running_phases, key=lambda p: _PHASE_ORDER.get(p, 99))
     elif is_running:
-        phase = "search"  # default if heartbeat hasn't written yet
+        phase = "search"
     else:
-        phase = "done" if all(r.status != "running" for r in rows) else None
+        phase = "done"
 
+    # Progress units differ per phase (search pages, then detail pages):
+    # while running, only sum the runs in the reported phase.
+    in_phase = [r for r in running if r.phase == phase] if is_running else rows
+
+    finished = [r.finished_at for r in rows]
     return ScrapeStatusResponse(
         is_running=is_running,
         is_stale=is_stale,
-        started_at=started_at,
-        finished_at=finished_at if not is_running else None,
+        started_at=min((r.started_at for r in rows if r.started_at), default=None),
+        finished_at=None if is_running or None in finished else max(finished),
         seconds_since_last_progress=seconds_since,
-        progress_done=progress_done,
-        progress_total=progress_total,
+        progress_done=sum(r.progress_done or 0 for r in in_phase),
+        progress_total=sum(r.progress_total or 0 for r in in_phase),
         phase=phase,
         runs=[ScrapeRunResponse.model_validate(r) for r in rows],
     )
 
 
 @router.get("/runs", response_model=list[ScrapeRunResponse])
-async def list_recent_runs(db: AsyncSession = Depends(get_db)) -> list[ScrapeRunResponse]:
-    """Recent run history — used by /admin pages and debugging."""
+async def list_recent_runs(
+    limit: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[ScrapeRunResponse]:
+    result = await db.execute(select(ScrapeRun).order_by(ScrapeRun.started_at.desc()).limit(limit))
+    return [ScrapeRunResponse.model_validate(r) for r in result.scalars().all()]
+
+
+@router.get("/runs/{run_id}/errors", response_model=list[ScrapeErrorResponse])
+async def run_errors(run_id: str, db: AsyncSession = Depends(get_db)) -> list[ScrapeErrorResponse]:
+    if await db.get(ScrapeRun, run_id) is None:
+        raise HTTPException(status_code=404, detail="Run non trovato")
     result = await db.execute(
-        select(ScrapeRun).order_by(ScrapeRun.started_at.desc()).limit(20)
+        select(ScrapeError).where(ScrapeError.run_id == run_id).order_by(ScrapeError.created_at)
     )
-    runs = result.scalars().all()
-    return [ScrapeRunResponse.model_validate(r) for r in runs]
+    return [ScrapeErrorResponse.model_validate(e) for e in result.scalars().all()]
+
+
+@router.get("/errors", response_model=list[ScrapeErrorResponse])
+async def recent_errors(
+    portal: str | None = None,
+    kind: str | None = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+) -> list[ScrapeErrorResponse]:
+    """Most recent failures, filterable — e.g. ``?portal=casa&kind=blocked``
+    answers "is casa.it banning us?"."""
+    query = select(ScrapeError).order_by(ScrapeError.created_at.desc()).limit(limit)
+    if portal:
+        query = query.where(ScrapeError.portal == portal)
+    if kind:
+        query = query.where(ScrapeError.kind == kind)
+    result = await db.execute(query)
+    return [ScrapeErrorResponse.model_validate(e) for e in result.scalars().all()]

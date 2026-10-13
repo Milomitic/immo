@@ -149,6 +149,9 @@ export interface ScrapeRun {
   progress_total?: number | null;
   phase?: string | null;
   last_progress_at?: string | null;
+  listings_seen?: number | null;
+  coverage_complete?: boolean | null;
+  job_id?: string | null;
 }
 
 export interface ScrapeStatus {

@@ -23,7 +23,25 @@ class Settings(BaseSettings):
     SCRAPE_REMAX_ENABLED: bool = True
     SCRAPE_GABETTI_ENABLED: bool = True
     SCRAPE_VISTOCASA_ENABLED: bool = True
-    SCRAPE_RATE_LIMIT_RPM: int = 60  # 1 request/sec - safe for search pages
+    SCRAPE_RATE_LIMIT_RPM: int = 60  # default for portals not listed below
+    # Per-portal overrides. casa.it's WAF bans the IP after aggressive runs,
+    # so it gets half the default budget.
+    SCRAPE_RATE_LIMITS: dict[str, int] = {
+        "immobiliare": 90,
+        "casa": 30,
+        "tecnocasa": 60,
+        "remax": 60,
+        "gabetti": 60,
+        "vistocasa": 90,
+    }
+    # Upper bound on search pages per path. Spiders follow the site's own
+    # page count up to this; immobiliare offers ~100 pages for Bari, so the
+    # old cap of 50 silently hid half its catalog.
+    SCRAPE_MAX_PAGES: int = 200
+    # Consecutive failed requests after which a spider stops hitting the
+    # portal for the rest of the run (blocked / down) instead of digging
+    # its ban deeper.
+    SCRAPE_CIRCUIT_BREAKER_THRESHOLD: int = 8
     SCRAPE_REQUEST_DELAY_MIN: float = 0.5
     SCRAPE_REQUEST_DELAY_MAX: float = 2.0
     # Concurrent detail-fetches per spider. The RateLimiter still caps
@@ -44,7 +62,13 @@ class Settings(BaseSettings):
 
     # Deduplication
     DEDUP_THRESHOLD: float = 0.85
+    # A listing not seen on any portal for this many days is deactivated
+    # (only for portals whose last run had full coverage — see ScrapeRun).
     LISTING_INACTIVE_DAYS: int = 14
+
+    # If set, mutating endpoints (scrape trigger, …) require the header
+    # ``X-Admin-Token: <value>``. Leave empty for local single-user use.
+    ADMIN_TOKEN: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(_PROJECT_ROOT / ".env"),

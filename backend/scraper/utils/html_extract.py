@@ -239,6 +239,49 @@ def extract_publication_date_from_text(text: str) -> str | None:
     return _parse_relative_italian(text)
 
 
+# "senza ascensore", "privo di giardino", "non dotato di box auto", "no garage"
+_NEGATION_BEFORE = re.compile(
+    r"(?:\bsenza|\bpriv[oa] di|\bsprovvist[oa] di|\bassenza di|\bnon (?:c'è|c'e|ha|è dotat[oa] di|e' dotat[oa] di|dotat[oa] di)|\bno)"
+    r"(?:\s+\w+){0,2}\s*$"
+)
+
+
+def detect_feature(text: str | None, *keywords: str) -> bool | None:
+    """Tri-state feature detection over *listing* text (description,
+    feature labels) — never the whole page, whose sidebars, search facets
+    and SEO links mention "giardino"/"ascensore" on every listing.
+
+    True if a keyword appears, False if its first mention is negated
+    ("senza ascensore"), None if never mentioned (unknown, not "no").
+    """
+    if not text:
+        return None
+    t = text.lower()
+    hits = [m for kw in keywords for m in re.finditer(re.escape(kw.lower()), t)]
+    if not hits:
+        return None
+    first = min(hits, key=lambda m: m.start())
+    window = t[max(0, first.start() - 40): first.start()]
+    return not _NEGATION_BEFORE.search(window)
+
+
+def yes_no(value) -> bool | None:
+    """Map a structured feature value ("sì", "No", 1, True, "presente") to
+    a bool; None for anything unrecognisable."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    v = str(value).strip().lower()
+    if v.startswith(("sì", "si", "yes", "presente", "true")) or v.isdigit() and int(v) > 0:
+        return True
+    if v.startswith(("no", "assente", "false")) or v == "0":
+        return False
+    return None
+
+
 def clamp_italy_coords(lat, lng):
     """Drop lat/lng pairs that fall outside Italy's bounding box or look
     obviously swapped. Returns ``(lat, lng)`` — either the input unchanged,

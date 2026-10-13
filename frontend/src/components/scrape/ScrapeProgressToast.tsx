@@ -48,8 +48,25 @@ export function ScrapeProgressToast() {
     return () => clearTimeout(t);
   }, [completedAt]);
 
-  // ETA — live rate when we've got at least 1s + 1 item, baseline
-  // otherwise. Same two-tier scheme as finance-alert.
+  // Where the current phase stood when this client first saw it. Progress
+  // restarts per phase (search pages, then listings), so the rate must be
+  // measured within the phase: job-wide elapsed time includes the search
+  // phase and made the detail ETA far too pessimistic.
+  const [phaseMark, setPhaseMark] = useState<{ phase: string | null; at: number; done: number } | null>(null);
+  useEffect(() => {
+    if (!data?.is_running) {
+      setPhaseMark(null);
+      return;
+    }
+    setPhaseMark((prev) =>
+      prev && prev.phase === data.phase && data.progress_done >= prev.done
+        ? prev
+        : { phase: data.phase, at: Date.now(), done: data.progress_done },
+    );
+  }, [data]);
+
+  // ETA — observed in-phase rate once we have 3s and 1 item of it,
+  // baseline otherwise.
   const { etaSecs, percent, elapsedSecs } = useMemo(() => {
     if (!data || !data.started_at) return { etaSecs: null as number | null, percent: 0, elapsedSecs: 0 };
     const elapsed = Math.max(0, (Date.now() - new Date(data.started_at).getTime()) / 1000);
@@ -59,17 +76,18 @@ export function ScrapeProgressToast() {
     if (total > 0) pct = Math.min(100, (done / total) * 100);
     let eta: number | null = null;
     if (total > 0) {
-      if (done >= 1 && elapsed >= 1) {
-        const rate = done / elapsed; // items/sec
-        eta = rate > 0 ? (total - done) / rate : null;
+      const phaseSecs = phaseMark ? (Date.now() - phaseMark.at) / 1000 : 0;
+      const phaseDone = phaseMark ? done - phaseMark.done : 0;
+      if (phaseDone >= 1 && phaseSecs >= 3) {
+        eta = (total - done) / (phaseDone / phaseSecs);
       } else {
-        // Baseline: assume the bottleneck is the detail-fetch rate-limit
-        // (~1 req/s by default), so each remaining unit ≈ 1 second.
+        // Baseline: the per-portal rate limit is ~1 request/s, and every
+        // remaining unit (search page or listing) costs one request.
         eta = total - done;
       }
     }
     return { etaSecs: eta, percent: pct, elapsedSecs: elapsed };
-  }, [data]);
+  }, [data, phaseMark]);
 
   if (!data) return null;
 
@@ -79,7 +97,9 @@ export function ScrapeProgressToast() {
 
   // Aggregate counters across runs for the post-completion summary.
   const totalsNew = data.runs.reduce((a, r) => a + (r.listings_new ?? 0), 0);
-  const totalsFound = data.runs.reduce((a, r) => a + (r.listings_found ?? 0), 0);
+  // "Seen" = every listing checked on the search pages. With immutable
+  // snapshots most are known, so "new" alone undersells what a scan did.
+  const totalsSeen = data.runs.reduce((a, r) => a + (r.listings_seen ?? r.listings_found ?? 0), 0);
   const totalsErrors = data.runs.reduce((a, r) => a + (r.errors ?? 0), 0);
 
   const phaseLabel = data.phase === "search"
@@ -140,7 +160,9 @@ export function ScrapeProgressToast() {
         <div className="flex items-center justify-between text-xs text-[var(--muted-foreground)]">
           <span>{phaseLabel}</span>
           {data.is_running && etaSecs != null && (
-            <span>ETA ~{formatSecs(etaSecs)}</span>
+            // In search the detail workload isn't known yet: the ETA only
+            // covers the search pages, and says so.
+            <span>{data.phase === "search" ? "Fine ricerca" : "ETA"} ~{formatSecs(etaSecs)}</span>
           )}
           {!data.is_running && (
             <span>{formatSecs(elapsedSecs)} totali</span>
@@ -159,6 +181,7 @@ export function ScrapeProgressToast() {
             <div className="flex justify-between text-[11px] text-[var(--muted-foreground)] tabular-nums">
               <span>
                 {data.progress_done.toLocaleString("it-IT")} / {data.progress_total.toLocaleString("it-IT")}
+                {data.phase === "search" ? " pagine" : " annunci"}
               </span>
               <span>{percent.toFixed(0)}%</span>
             </div>
@@ -169,9 +192,9 @@ export function ScrapeProgressToast() {
         {!data.is_running && (
           <div className="text-xs text-[var(--muted-foreground)] space-y-1">
             <div>
-              <span className="font-semibold text-[var(--foreground)]">{totalsNew.toLocaleString("it-IT")}</span> nuovi
+              <span className="font-semibold text-[var(--foreground)]">{totalsSeen.toLocaleString("it-IT")}</span> verificati
               {" · "}
-              <span className="font-semibold text-[var(--foreground)]">{totalsFound.toLocaleString("it-IT")}</span> trovati
+              <span className="font-semibold text-[var(--foreground)]">{totalsNew.toLocaleString("it-IT")}</span> nuovi
               {totalsErrors > 0 && (
                 <>
                   {" · "}
@@ -211,9 +234,13 @@ export function ScrapeProgressToast() {
                     ? "bg-[var(--warning)]/10 text-[var(--warning)]"
                     : "bg-[var(--success)]/10 text-[var(--success)]"
                 }`}
-                title={`${portalLabel(r.portal)}: ${r.listings_new} nuovi`}
+                title={
+                  `${portalLabel(r.portal)}: ${r.listings_seen ?? 0} verificati, ${r.listings_new} nuovi` +
+                  (r.coverage_complete === false ? " — catalogo visto solo in parte" : "")
+                }
               >
                 {r.errors > 0 ? "⚠" : "✓"} {portalLabel(r.portal)}
+                {r.coverage_complete === false && <span className="opacity-70">(parziale)</span>}
               </span>
             ))}
           </div>

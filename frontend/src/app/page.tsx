@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Search, MapPin, ArrowRight, Map as MapIcon, Sparkles, RefreshCw, Loader2 } from "lucide-react";
 import { useStats } from "@/hooks/useListings";
 import { useScrapeStatus, useTriggerScrape } from "@/hooks/useScrapeStatus";
+import { ApiError } from "@/lib/api";
 import { formatPrice, portalLabel } from "@/lib/utils";
 
 export default function HomePage() {
@@ -15,7 +16,12 @@ export default function HomePage() {
   const { data: stats } = useStats();
   const { data: scrapeStatus } = useScrapeStatus();
   const triggerScrape = useTriggerScrape();
-  const isRunning = scrapeStatus?.is_running ?? false;
+  // A hung worker (stale heartbeat) shouldn't lock the button: the backend
+  // already lets a new scan start in that case.
+  const isRunning = (scrapeStatus?.is_running ?? false) && !scrapeStatus?.is_stale;
+  const triggerError = triggerScrape.error instanceof ApiError && triggerScrape.error.status !== 409
+    ? triggerScrape.error.message
+    : null;
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +74,11 @@ export default function HomePage() {
                 </>
               )}
             </button>
+            {triggerError && (
+              <span role="alert" className="basis-full text-xs text-[var(--destructive)]">
+                {triggerError}
+              </span>
+            )}
           </div>
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-[var(--foreground)] mb-4 animate-fade-up animation-delay-100">
             Cerca casa su tutti i portali,<br />

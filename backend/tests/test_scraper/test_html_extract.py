@@ -5,10 +5,12 @@ import pytest
 from scraper.utils.html_extract import (
     clamp_italy_coords,
     clamp_publication_date,
+    detect_feature,
     map_property_type,
     parse_float_text,
     parse_int,
     parse_italian_date,
+    yes_no,
 )
 
 
@@ -94,6 +96,39 @@ class TestMapPropertyType:
     )
     def test_mapping(self, raw, expected):
         assert map_property_type(raw) == expected
+
+
+class TestDetectFeature:
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Palazzo signorile con ascensore e portineria", True),
+            ("Stabile senza ascensore, terzo piano", False),
+            ("immobile privo di ascensore", False),
+            ("Non è dotato di ascensore", False),
+            ("Ampio soggiorno e due camere", None),
+            (None, None),
+        ],
+    )
+    def test_elevator(self, text, expected):
+        assert detect_feature(text, "ascensore") is expected
+
+    def test_first_mention_decides(self):
+        text = "Con ascensore. Il box è senza ascensore interno."
+        assert detect_feature(text, "ascensore") is True
+
+    def test_stem_keywords(self):
+        assert detect_feature("ampi balconi panoramici", "balcon") is True
+        assert detect_feature("terrazzino abitabile", "terrazz") is True
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [("sì", True), ("Si", True), ("no", False), ("No", False), (1, True), (0, False),
+     (True, True), ("presente", True), ("", None), (None, None), ("autonomo", None)],
+)
+def test_yes_no(value, expected):
+    assert yes_no(value) is expected
 
 
 def test_parse_int_and_float():

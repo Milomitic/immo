@@ -71,6 +71,9 @@ class ImmobiliareSpider(BaseSpider):
         known_ids = params.known_source_ids or set()
 
         all_items: list = []
+        # Search-page progress; each path's page count is only known once its
+        # first page is in, so the total grows path by path.
+        pages_total = 0
         for path_idx, path_template in enumerate(paths, start=1):
             self._current_path = path_template.format(city=params.city)
             logger.info("crawling_path", portal=self.portal_name, path=self._current_path)
@@ -79,20 +82,28 @@ class ImmobiliareSpider(BaseSpider):
             )
 
             url = await self.build_search_url(params, page=1)
-            html = await self.fetch(url)
-            if not html:
-                logger.warning("path_failed", portal=self.portal_name, path=self._current_path)
-                continue
-
-            data = self._parse_next_data(html)
+            html = await self.fetch(url, not_found_ok=False)
+            data = self._parse_next_data(html) if html else None
             if not data:
-                logger.warning("no_next_data", portal=self.portal_name, path=self._current_path)
+                logger.warning("path_failed", portal=self.portal_name, path=self._current_path)
+                self.search_pages_failed += 1
+                if html:  # page served, payload gone: the layout changed
+                    self.record_error("parse", url, None, "search payload (__NEXT_DATA__) not found")
+                pages_total += 1
+                self.progress.set_total(pages_total)
+                self.progress.advance()
                 continue
 
-            total_pages = min(data.get("maxPages", 1), params.max_pages)
+            site_pages = data.get("maxPages") or 1
+            total_pages = min(site_pages, params.max_pages)
+            if site_pages > params.max_pages:
+                self.search_truncated = True
+            pages_total += total_pages
+            self.progress.set_total(pages_total)
+            self.progress.advance()
             total_ads = data.get("totalAds", 0)
             logger.info("pages_found", portal=self.portal_name, path=self._current_path,
-                        total_pages=total_pages, total_ads=total_ads)
+                        total_pages=total_pages, site_pages=site_pages, total_ads=total_ads)
 
             all_items.extend(self._extract_items(data, params))
             self.progress.set_description(
@@ -100,17 +111,29 @@ class ImmobiliareSpider(BaseSpider):
             )
 
             for page in range(2, total_pages + 1):
+                if self.circuit_open:
+                    self.search_pages_failed += total_pages - page + 1
+                    break
                 page_url = await self.build_search_url(params, page)
-                page_html = await self.fetch(page_url)
-                if not page_html:
-                    continue
-                page_data = self._parse_next_data(page_html)
+                page_html = await self.fetch(page_url, not_found_ok=False)
+                self.progress.advance()
+                page_data = self._parse_next_data(page_html) if page_html else None
                 if not page_data:
+                    self.search_pages_failed += 1
                     continue
                 all_items.extend(self._extract_items(page_data, params))
                 self.progress.set_description(
                     f"path {path_idx}/{len(paths)} pag {page}/{total_pages} ({len(all_items)} url)"
                 )
+
+        # The same listing can show up on two pages (results shift while we
+        # paginate) or under both paths; keep the first occurrence.
+        unique: dict[str, ListingItem] = {}
+        for it in all_items:
+            if it.source_id and it.source_id not in unique:
+                unique[it.source_id] = it
+        all_items = list(unique.values())
+        self.listings_seen = len(all_items)
 
         # Skip listings that are already in the DB — first snapshot is
         # immutable, we only bump last_seen_at via the runner. The search
@@ -120,7 +143,7 @@ class ImmobiliareSpider(BaseSpider):
         # round-trip needed.
         to_yield = []
         for it in all_items:
-            if it.source_id and it.source_id in known_ids:
+            if it.source_id in known_ids:
                 self.known_skipped_ids.append(it.source_id)
                 if it.price is not None:
                     self.observed_prices[it.source_id] = it.price

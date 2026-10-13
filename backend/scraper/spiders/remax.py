@@ -1,63 +1,131 @@
 """
 Remax.it spider.
 
-Remax is a Nuxt.js site. Detail pages render a fixed "unit-overview" block
-server-side with all the headline fields (price, property type, address,
-area, rooms) plus a small grid of "unit-feature" rows (bathrooms, bedrooms,
-energy class). Photos are lazy-loaded via JS, so we fall back to og:image
-for the cover shot.
+remax.it moved from Nuxt to the Next.js App Router in 2026. Both page kinds
+now ship structured data, so nothing is scraped from markup:
 
-Search URL pattern: /trova/ricerca/{Vendita|Affitto}/{City}?page=N
+* Search: ``/{vendita|affitto}-case/{city}?page=N``, 12 cards per page.
+  Listing URLs come from the schema.org ``ItemList`` (JSON-LD); each card's
+  ``code`` and ``price``, plus ``{"currentPage":..,"totalPages":..}``, from
+  the RSC flight payload (see ``scraper.utils.rsc``).
+* Detail: agency-subdomain URLs ending in the listing code, e.g.
+  ``https://oltre.remax.it/vendita-villa-o-villino/bari/<zona>-36681014-42``.
+  The flight carries a ``"property":{...}`` object with structured
+  amenities, energy class, coordinates, ``publishedAt`` and photos flagged
+  ``isFloorPlan``; the description is a separate text row (``"$NN"``).
+
+The code ("36681014-42") has the same shape the old site used as source_id,
+so listings recorded before the redesign keep their identity.
 """
 
-import base64
+import json
+import math
 import re
+from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 
-from app.utils.text import clean_price
 from scraper.items import ListingItem
 from scraper.spiders.base import BaseSpider, SearchParams
-from scraper.utils.html_extract import map_property_type, parse_int
+from scraper.utils.html_extract import (
+    clamp_italy_coords,
+    clamp_publication_date,
+    detect_feature,
+    map_condition,
+    map_property_type,
+)
+from scraper.utils.rsc import flight_payload, json_values_after, resolve_text
+
+PAGE_SIZE = 12
+
+_CODE_RE = re.compile(r"-(\d+-\d+)/?(?:[?#].*)?$")
+_PAGES_RE = re.compile(r'"currentPage":\d+,"totalPages":(\d+)')
+_COUNT_RE = re.compile(r"(\d[\d.]*)\s+(?:case|immobili)\s+in\s+(?:vendita|affitto)", re.IGNORECASE)
+_ENERGY_RE = re.compile(r"^[A-G]\d?\+*$")
+
+# remax floor keys → the floor filter's vocabulary (digits, T, R, S).
+_FLOORS = {
+    "piano_terra": "T",
+    "piano_rialzato": "R",
+    "seminterrato": "S",
+    "interrato": "S",
+    "controterra": "S",
+    "su_due_livelli": "Più livelli",
+    "multipiano": "Più livelli",
+    "ultimo": "Ultimo",
+    "attico": "Attico",
+}
 
 
-def _title_case_city(city: str) -> str:
-    return " ".join(w.capitalize() for w in city.replace("-", " ").split())
+def _code_from_url(url: str) -> str | None:
+    m = _CODE_RE.search(url)
+    return m.group(1) if m else None
 
 
-def _pub_date_from_og_image(og_url: str) -> str | None:
-    """Remax's Nuxt SSR payload hides all timestamps, but every listing has
-    an `og:image` URL whose path is the base64-encoded CDN URL of the agent's
-    photo on gestim.biz. That path embeds a 14-digit upload timestamp, e.g.
+def _ld_blocks(soup: BeautifulSoup, type_name: str) -> list[dict]:
+    blocks = []
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(tag.string or "")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == type_name:
+            blocks.append(data)
+    return blocks
 
-        https://cdn7.gestim.biz/custom/01858/foto/2025/11/20251103154416-994103-50.jpeg
 
-    The first photo upload is a reliable proxy for when the listing went live
-    (remax agents upload pictures as part of the creation flow). We return
-    the ISO date — not time — since that's all we need downstream.
-    """
-    if not og_url:
+def _price(prop: dict) -> float | None:
+    if prop.get("isConfidential"):  # "Trattativa riservata"
         return None
-    m = re.search(r"/([A-Za-z0-9]{30,})__?og_image", og_url)
-    if not m:
-        return None
-    token = m.group(1)
+    price = prop.get("price")
+    return float(price) if isinstance(price, (int, float)) and price > 0 else None
+
+
+def _positive(value, cast=float):
     try:
-        padded = token + "=" * (-len(token) % 4)
-        decoded = base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
-    except Exception:
+        number = cast(value)
+    except (TypeError, ValueError):
         return None
-    tm = re.search(r"(20\d{12})", decoded)
-    if not tm:
-        return None
-    t = tm.group(1)
-    try:
-        year, month, day = int(t[:4]), int(t[4:6]), int(t[6:8])
-        if 1 <= month <= 12 and 1 <= day <= 31:
-            return f"{year:04d}-{month:02d}-{day:02d}"
-    except ValueError:
-        pass
+    return number if number > 0 else None
+
+
+def _any_flag(*values: bool | None) -> bool | None:
+    """Merge structured booleans: any True wins, then any explicit False."""
+    if any(v is True for v in values):
+        return True
+    if any(v is False for v in values):
+        return False
     return None
+
+
+def _flag(structured: bool | None, text: str, *keywords: str) -> bool | None:
+    """The structured checkbox decides when ticked; otherwise the description
+    can still reveal an amenity the agent didn't tick, or deny it
+    ("senza ascensore")."""
+    if structured is True:
+        return True
+    from_text = detect_feature(text, *keywords) if text else None
+    return from_text if from_text is not None else structured
+
+
+def _floor(raw) -> str | None:
+    if raw is None or raw == "":
+        return None
+    raw = str(raw)
+    return _FLOORS.get(raw, raw.replace("_", " "))
+
+
+def _year(raw) -> int | None:
+    year = _positive(raw, int)
+    if year and 1500 <= year <= datetime.now(timezone.utc).year + 5:
+        return year
+    return None
+
+
+def _html_to_text(html: str | None) -> str | None:
+    if not html:
+        return None
+    return BeautifulSoup(html, "lxml").get_text("\n", strip=True) or None
 
 
 class RemaxSpider(BaseSpider):
@@ -65,238 +133,154 @@ class RemaxSpider(BaseSpider):
     base_url = "https://www.remax.it"
 
     async def build_search_url(self, params: SearchParams, page: int) -> str:
-        contract = "Vendita" if params.listing_type == "sale" else "Affitto"
-        city_slug = _title_case_city(params.city)
-        url = f"{self.base_url}/trova/ricerca/{contract}/{city_slug}"
-        if page > 1:
-            url += f"?page={page}"
-        return url
+        contract = "affitto" if params.listing_type == "rent" else "vendita"
+        city = re.sub(r"[^a-z0-9]+", "-", params.city.lower()).strip("-")
+        url = f"{self.base_url}/{contract}-case/{city}"
+        return f"{url}?page={page}" if page > 1 else url
+
+    @staticmethod
+    def _extract_source_id_from_url(url: str) -> str | None:
+        return _code_from_url(url)
 
     async def parse_search_results(self, html: str) -> list[str]:
+        return [url for url, _ in await self.parse_search_results_with_prices(html)]
+
+    async def parse_search_results_with_prices(self, html: str) -> list[tuple[str, float | None]]:
         soup = BeautifulSoup(html, "lxml")
         urls: list[str] = []
         seen: set[str] = set()
-        for link in soup.select('a[href*="/trova/immobile/"]'):
-            href = link.get("href", "")
-            if not href:
-                continue
-            if href.startswith("/"):
-                href = self.base_url + href
-            if href in seen:
-                continue
-            seen.add(href)
-            urls.append(href)
-        return urls
+        for block in _ld_blocks(soup, "ItemList"):
+            for element in block.get("itemListElement") or []:
+                url = element.get("url") if isinstance(element, dict) else None
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+
+        cards: dict[str, dict] = {}
+        for prop in json_values_after(flight_payload(html), "property"):
+            if isinstance(prop, dict) and prop.get("code"):
+                cards.setdefault(prop["code"], prop)
+
+        results = []
+        for url in urls:
+            card = cards.get(_code_from_url(url) or "")
+            results.append((url, _price(card) if card else None))
+        return results
 
     async def get_total_pages(self, html: str) -> int:
-        """Parse the pagination bar. Remax shows numbered page buttons; we
-        grab the highest visible number and cap at max_pages."""
-        soup = BeautifulSoup(html, "lxml")
-        pages: list[int] = []
-        for el in soup.select("[class*='pagination'] *, nav a, nav button, nav li"):
-            text = el.get_text(strip=True)
-            if text.isdigit():
-                pages.append(int(text))
-        return max(pages) if pages else 1
+        m = _PAGES_RE.search(flight_payload(html))
+        if m:
+            return max(1, int(m.group(1)))
+        # Fallback: "437 case in vendita a Bari" in the meta description.
+        meta = BeautifulSoup(html, "lxml").find("meta", attrs={"name": "description"})
+        m = _COUNT_RE.search(meta.get("content", "") if meta else "")
+        if m:
+            return max(1, math.ceil(int(m.group(1).replace(".", "")) / PAGE_SIZE))
+        return 1
 
     async def parse_listing(self, url: str, html: str) -> ListingItem | None:
-        soup = BeautifulSoup(html, "lxml")
-
-        # --- source_id from code block or URL suffix
-        source_id = None
-        code_el = soup.select_one(".unit-overview__code")
-        if code_el:
-            text = code_el.get_text(" ", strip=True)
-            m = re.search(r"([\w-]+)$", text)
-            if m:
-                source_id = m.group(1)
-        if not source_id:
-            m = re.search(r"_([\w-]+)$", url.rstrip("/"))
-            if m:
-                source_id = m.group(1)
-            else:
-                source_id = url.rstrip("/").split("/")[-1]
-
-        # --- listing_type from Vendita/Affitto announce label
-        announce_el = soup.select_one(".unit-overview__announce")
-        announce = (announce_el.get_text(" ", strip=True) if announce_el else "").lower()
-        listing_type = "rent" if "affitto" in announce else "sale"
-
-        # --- property_type from the title block (Appartamento, Villa, ...)
-        title_block_el = soup.select_one(".unit-overview__title")
-        title_block = title_block_el.get_text(" ", strip=True) if title_block_el else ""
-        property_type = self._remax_property_type(title_block)
-
-        # --- Location string: "Via X, 12, Zona, Citta, PV" or "Citta, PV"
-        location_el = soup.select_one(".unit-overview__location")
-        location_raw = location_el.get_text(" ", strip=True) if location_el else ""
-        address, city, zone, province = self._split_location(location_raw)
-
-        # --- subtitle: "247mq, 5 locali"
-        subtitle_el = soup.select_one(".unit-overview__subtitle")
-        subtitle = subtitle_el.get_text(" ", strip=True) if subtitle_el else ""
-        area_sqm = self._parse_area(subtitle)
-        rooms = self._parse_rooms(subtitle)
-
-        # --- price ("Richiedere quotazione" returns None)
-        price = None
-        price_el = soup.select_one(".unit-overview__price")
-        if price_el:
-            raw_price = price_el.get_text(" ", strip=True)
-            if "richie" not in raw_price.lower():  # "Richiedere quotazione"
-                price = clean_price(raw_price)
-
-        # --- Feature grid (icons: #bedrooms, #bathrooms, #energyclass, #surface, #rooms)
-        bedrooms = None
-        bathrooms = None
-        energy_class = None
-        for feat in soup.select("div.unit-feature"):
-            use = feat.select_one("use")
-            href = use.get("xlink:href") if use else ""
-            text = feat.get_text(" ", strip=True)
-            if "bedrooms" in href:
-                bedrooms = parse_int(text)
-            elif "bathrooms" in href:
-                bathrooms = parse_int(text)
-            elif "energyclass" in href:
-                # Strip the "Classe energetica" label so the regex doesn't
-                # latch onto the 'C' in "Classe".
-                cleaned = re.sub(r"classe\s+energetica", "", text, flags=re.IGNORECASE).strip()
-                if cleaned and "non specif" not in cleaned.lower():
-                    m = re.search(r"\b([A-G]\d?)\b", cleaned, re.IGNORECASE)
-                    if m:
-                        energy_class = m.group(1).upper()
-            elif "surface" in href and area_sqm is None:
-                m = re.search(r"(\d[\d.,]*)", text)
-                if m:
-                    try:
-                        area_sqm = float(m.group(1).replace(".", "").replace(",", "."))
-                    except ValueError:
-                        pass
-            elif "rooms" in href and rooms is None:
-                rooms = parse_int(text)
-
-        # --- description
-        description = None
-        desc_el = soup.select_one(
-            ".unit-description, [class*='unit-description'], [itemprop='description']"
+        flight = flight_payload(html)
+        code = _code_from_url(url)
+        candidates = [
+            p for p in json_values_after(flight, "property") if isinstance(p, dict) and p.get("code")
+        ]
+        # Detail pages may also embed cards of similar listings: prefer the
+        # code from the URL, then the only object carrying a photo gallery.
+        prop = next((p for p in candidates if p["code"] == code), None) or next(
+            (p for p in candidates if "photos" in p), None
         )
-        if not desc_el:
-            desc_el = soup.select_one("[class*='description']")
-        if desc_el:
-            description = desc_el.get_text(" ", strip=True)[:4000]
+        if prop is None:
+            raise ValueError("remax: property payload not found")
 
-        # --- cover image from og:image (property gallery is JS-hydrated).
-        # The og:image URL path also encodes the agent's upload timestamp,
-        # which we use below as a publication_date proxy.
-        images: list[str] = []
-        og_url = ""
-        og = soup.find("meta", attrs={"property": "og:image"})
-        if og:
-            og_url = og.get("content", "")
-            if og_url.startswith("http"):
-                images.append(og_url)
+        soup = BeautifulSoup(html, "lxml")
+        ld = next(iter(_ld_blocks(soup, "RealEstateListing")), {})
 
-        publication_date = _pub_date_from_og_image(og_url)
+        description = (
+            _html_to_text(resolve_text(flight, prop.get("description")))
+            or ld.get("description")
+            or prop.get("shortDescription")
+            or None
+        )
+        if description:
+            description = description[:4000]
+        text = description or ""
 
-        # --- title: synthesize something informative
-        title_parts: list[str] = []
-        if title_block:
-            title_parts.append(title_block)
-        if subtitle:
-            title_parts.append(subtitle)
-        locality = zone or city
-        if locality:
-            title_parts.append(locality.title())
-        title = " - ".join(title_parts) if title_parts else f"Annuncio remax {source_id}"
+        photos = sorted(
+            (p for p in prop.get("photos") or [] if isinstance(p, dict) and p.get("url")),
+            key=lambda p: p.get("order") or 0,
+        )
+        images = [p["url"] for p in photos if not p.get("isFloorPlan")]
+        floor_plans = [p["url"] for p in photos if p.get("isFloorPlan")]
+        if not images and prop.get("mainPhotoUrl"):
+            images = [prop["mainPhotoUrl"]]
 
-        page_text_lower = soup.get_text(" ", strip=True).lower()
+        macro = (prop.get("macroCategory") or "").lower()
+        if macro in ("commerciale", "industriale"):
+            property_type = "commercial"
+        elif macro == "terreni":
+            property_type = "land"
+        else:
+            property_type = self._remax_property_type((prop.get("propertyType") or "").replace("_", " "))
+
+        lat, lng = clamp_italy_coords(prop.get("latitude"), prop.get("longitude"))
+        energy_class = (prop.get("energyClass") or "").upper()
+        heating = prop.get("heating")
+        page_title = soup.title.get_text(strip=True).split(" | ")[0] if soup.title else ""
 
         return ListingItem(
             source_portal=self.portal_name,
-            source_id=source_id,
+            source_id=prop["code"],
             source_url=url,
-            title=title,
+            title=ld.get("name") or page_title or f"Annuncio remax {prop['code']}",
             description=description,
-            price=price,
-            area_sqm=area_sqm,
-            rooms=rooms,
-            bedrooms=bedrooms,
-            bathrooms=bathrooms,
-            floor=None,
-            address=address,
-            city=city or "unknown",
-            zone=zone,
-            province=province,
-            lat=None,
-            lng=None,
+            price=_price(prop),
+            area_sqm=_positive(prop.get("totalArea")),
+            rooms=_positive(prop.get("rooms"), int),
+            bedrooms=_positive(prop.get("bedrooms"), int),
+            bathrooms=_positive(prop.get("bathrooms"), int),
+            floor=_floor(prop.get("floor")),
+            total_floors=_positive(prop.get("totalFloors"), int),
+            address=prop.get("address") or (ld.get("address") or {}).get("streetAddress"),
+            city=(prop.get("city") or "").strip().lower() or "unknown",
+            zone=prop.get("neighborhood") or prop.get("quadrantName"),
+            province=prop.get("province"),
+            lat=lat,
+            lng=lng,
             property_type=property_type,
-            listing_type=listing_type,
+            listing_type="rent" if prop.get("contractType") == "affitto" else "sale",
             images=images,
-            energy_class=energy_class,
-            has_elevator="ascensore" in page_text_lower or None,
-            has_balcony="balcone" in page_text_lower or None,
-            has_terrace="terrazz" in page_text_lower or None,
-            has_garage=("garage" in page_text_lower or "box auto" in page_text_lower) or None,
-            has_garden="giardino" in page_text_lower or None,
-            publication_date=publication_date,
-            raw_data={"location_raw": location_raw, "subtitle": subtitle},
+            floor_plans=floor_plans,
+            energy_class=energy_class if _ENERGY_RE.match(energy_class) else None,
+            condition=map_condition((prop.get("conservationState") or "").replace("_", " ")),
+            heating=heating.replace("_", " ") if heating else None,
+            has_elevator=_flag(prop.get("hasElevator"), text, "ascensore"),
+            has_balcony=_flag(prop.get("hasBalcony"), text, "balcon"),
+            has_terrace=_flag(prop.get("hasTerrace"), text, "terrazz"),
+            has_garage=_flag(
+                _any_flag(prop.get("hasGarage"), prop.get("hasBox"), prop.get("hasParking")),
+                text, "garage", "box auto", "posto auto",
+            ),
+            has_garden=_flag(prop.get("hasGarden"), text, "giardin"),
+            condominium_fees=_positive(prop.get("condominiumFees")),
+            year_built=_year(prop.get("constructionYear")),
+            publication_date=clamp_publication_date(prop.get("publishedAt")),
+            raw_data={
+                "remax_id": prop.get("id"),
+                "gestim_id": prop.get("gestimId"),
+                "agency": prop.get("agencyName"),
+            },
         )
 
     @staticmethod
-    def _split_location(raw: str) -> tuple[str | None, str | None, str | None, str | None]:
-        """Parse remax location strings.
-
-        Shapes seen in the wild:
-          "Framura, SP"                            -> city + province
-          "Corso Alcide De Gasperi, 312 S. Pasquale, Bari, BA"
-            The civic number ("312") leads a token that continues with the
-            zone ("S. Pasquale"). We reattach the number to the street and
-            keep the zone text separate.
-
-        Returns (address, city, zone, province).
-        """
-        if not raw:
-            return None, None, None, None
-        parts = [p.strip() for p in raw.split(",") if p.strip()]
-        if not parts:
-            return None, None, None, None
-
-        province = None
-        if len(parts[-1]) == 2 and parts[-1].isalpha() and parts[-1].isupper():
-            province = parts.pop()
-
-        city = None
-        if parts:
-            city = parts.pop().lower()
-
-        # Reattach a leading civic number from the next token to the street.
-        if len(parts) >= 2:
-            m = re.match(r"^(\d+[A-Za-z]?)\s+(.+)$", parts[1])
-            if m:
-                parts[0] = f"{parts[0]}, {m.group(1)}"
-                parts[1] = m.group(2).strip()
-
-        zone = None
-        address = None
-        if len(parts) >= 2:
-            zone = parts[-1]
-            address = ", ".join(parts[:-1])
-        elif len(parts) == 1:
-            address = parts[0]
-
-        return address, city, zone, province
-
-    @staticmethod
-    def _remax_property_type(title_block: str) -> str:
-        """Map remax's title-block label to ListingItem.property_type.
+    def _remax_property_type(raw: str) -> str:
+        """Map remax's property type label to ListingItem.property_type.
 
         Remax sells more than apartments — hotels, land, commercial, etc. —
         so we widen the mapping beyond the shared helper.
         """
-        if not title_block:
+        if not raw:
             return "apartment"
-        lower = title_block.lower()
+        lower = raw.lower()
         if "agriturismo" in lower or "albergo" in lower or "hotel" in lower or "b&b" in lower:
             return "commercial"
         if "ufficio" in lower or "negozio" in lower or "capannone" in lower or "magazzino" in lower:
@@ -312,22 +296,3 @@ class RemaxSpider(BaseSpider):
         if "monolocale" in lower:
             return "studio"
         return map_property_type(lower)
-
-    @staticmethod
-    def _parse_area(subtitle: str) -> float | None:
-        if not subtitle:
-            return None
-        m = re.search(r"(\d[\d.,]*)\s*mq", subtitle, re.IGNORECASE)
-        if not m:
-            return None
-        try:
-            return float(m.group(1).replace(".", "").replace(",", "."))
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _parse_rooms(subtitle: str) -> int | None:
-        if not subtitle:
-            return None
-        m = re.search(r"(\d+)\s*local", subtitle, re.IGNORECASE)
-        return int(m.group(1)) if m else None

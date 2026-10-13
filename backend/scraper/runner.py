@@ -12,12 +12,16 @@ import structlog
 
 from app.config import settings
 from app.database import async_session, init_db
-from app.models.scrape_run import ScrapeRun
+from app.models.scrape_run import ScrapeError, ScrapeRun
+from app.services.scrape_service import enabled_portals
 from app.utils.logging import setup_logging
 from scraper.pipeline import (
     bump_last_seen,
+    cities_of_source_ids,
+    deactivate_stale_listings,
     get_known_source_ids,
     process_items_batch,
+    refresh_source_urls,
     update_prices_from_observations,
 )
 from scraper.spiders.base import SearchParams
@@ -224,7 +228,8 @@ async def run_spider(
     if reporter is None:
         reporter = _ProgressBar(portal)
 
-    rate_limiter = RateLimiter(requests_per_minute=settings.SCRAPE_RATE_LIMIT_RPM)
+    rpm = settings.SCRAPE_RATE_LIMITS.get(portal, settings.SCRAPE_RATE_LIMIT_RPM)
+    rate_limiter = RateLimiter(requests_per_minute=rpm)
     spider = spider_cls(
         rate_limiter=rate_limiter,
         delay_min=settings.SCRAPE_REQUEST_DELAY_MIN,
@@ -268,6 +273,8 @@ async def run_spider(
     errors = 0
     error_details: list[str] = []
     batch: list = []
+    # Cities this run observed: the only ones its coverage says anything about.
+    seen_cities: set[str] = set()
 
     async def flush() -> None:
         nonlocal new, updated, duplicate, skipped, errors
@@ -288,16 +295,21 @@ async def run_spider(
                 f"+{new} nuovi, {updated} agg, {duplicate} dup"
             )
 
+    spider_crashed = False
     try:
         async for item in spider.run(params):
             found += 1
+            if item.city:
+                seen_cities.add(item.city.lower())
             batch.append(item)
             if len(batch) >= BATCH_SIZE:
                 await flush()
         await flush()
     except Exception as e:
+        spider_crashed = True
         errors += 1
-        error_details.append(f"Spider error: {str(e)}")
+        error_details.append(f"Spider error: {e}")
+        spider.record_error("spider", None, None, f"{type(e).__name__}: {e}")
     finally:
         await spider.close()
 
@@ -306,12 +318,15 @@ async def run_spider(
         try:
             await bump_last_seen(portal, spider.known_skipped_ids)
             skipped += len(spider.known_skipped_ids)
-        except Exception:
-            pass
+        except Exception as e:
+            spider.record_error("spider", None, None, f"bump_last_seen failed: {e}")
+        try:
+            await refresh_source_urls(portal, spider.observed_urls)
+        except Exception as e:
+            spider.record_error("spider", None, None, f"url refresh failed: {e}")
         # Diff search-card prices vs stored prices for known listings.
-        # Only fields we touch are price/price_previous/price_changed_at
-        # — content snapshot stays immutable per the user's history-first
-        # design.
+        # Only price/price_previous/price_changed_at are touched — the
+        # content snapshot stays immutable.
         if spider.observed_prices:
             try:
                 pc = await update_prices_from_observations(portal, spider.observed_prices)
@@ -320,8 +335,22 @@ async def run_spider(
                     reporter.set_stats(
                         f"+{new} nuovi, {updated} agg, {duplicate} dup, {price_changes} prezzi variati"
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                spider.record_error("spider", None, None, f"price diff failed: {e}")
+
+    # Deactivate listings that vanished from the portal — but only when this
+    # run saw the whole catalog. With truncated pagination, a blocked portal
+    # or a crash, "not seen" just means "not reached".
+    coverage_complete = spider.coverage_complete and not spider_crashed and spider.listings_seen > 0
+    deactivated = 0
+    if coverage_complete:
+        try:
+            seen_cities |= await cities_of_source_ids(portal, spider.known_skipped_ids)
+            deactivated = await deactivate_stale_listings(
+                portal, settings.LISTING_INACTIVE_DAYS, seen_cities
+            )
+        except Exception as e:
+            spider.record_error("spider", None, None, f"deactivation failed: {e}")
 
     # Stop the heartbeat task before the final write so the two don't
     # race on the same row.
@@ -331,28 +360,48 @@ async def run_spider(
     except (asyncio.TimeoutError, Exception):
         pass
 
+    # "gone" = a listing removed between search and detail fetch —
+    # informational, not a run failure.
+    failures = [e for e in spider.errors if e["kind"] != "gone"]
+    errors += len(failures)
+    ok = errors == 0
+
     finished_at = datetime.now(timezone.utc).isoformat()
     async with async_session() as db:
         result = await db.get(ScrapeRun, run_id)
         if result:
-            result.status = "completed" if errors == 0 else "completed_with_errors"
+            result.status = "completed" if ok else "completed_with_errors"
             result.finished_at = finished_at
             result.listings_found = found
             result.listings_new = new
             result.listings_updated = updated
+            result.listings_deactivated = deactivated
+            result.listings_seen = spider.listings_seen
+            result.coverage_complete = coverage_complete
             result.errors = errors
             result.error_details = json.dumps(error_details) if error_details else None
             # Final progress write — set done = total so the UI shows
             # 100% even if the heartbeat missed the last tick.
-            result.phase = "done" if errors == 0 else "failed"
+            result.phase = "done" if ok else "failed"
             result.last_progress_at = finished_at
             if result.progress_total:
                 result.progress_done = result.progress_total
+            db.add_all(
+                ScrapeError(run_id=run_id, portal=portal, created_at=finished_at, **err)
+                for err in spider.errors
+            )
             await db.commit()
 
-    summary = f"FATTO: {found} trovati, {new} nuovi, {updated} agg, {duplicate} dup, {errors} err"
+    summary = (
+        f"FATTO: {spider.listings_seen} visti, {found} nuovi-dettaglio, {new} nuovi, "
+        f"{updated} agg, {duplicate} dup, {errors} err"
+    )
     if price_changes:
         summary += f", {price_changes} prezzi variati"
+    if deactivated:
+        summary += f", {deactivated} disattivati"
+    if not coverage_complete:
+        summary += " (copertura parziale)"
     reporter.finish(summary)
 
 
@@ -362,15 +411,7 @@ async def run_all_spiders(city: str, listing_type: str) -> None:
     # it so /api/scrape/status can aggregate exactly this job.
     job_id = _uuid.uuid4().hex
 
-    portal_enabled = {
-        "immobiliare": settings.SCRAPE_IMMOBILIARE_ENABLED,
-        "casa": settings.SCRAPE_CASA_ENABLED,
-        "tecnocasa": getattr(settings, "SCRAPE_TECNOCASA_ENABLED", False),
-        "remax": getattr(settings, "SCRAPE_REMAX_ENABLED", False),
-        "gabetti": getattr(settings, "SCRAPE_GABETTI_ENABLED", False),
-        "vistocasa": getattr(settings, "SCRAPE_VISTOCASA_ENABLED", False),
-    }
-    active = [p for p, enabled in portal_enabled.items() if enabled and p in SPIDERS]
+    active = [p for p in enabled_portals() if p in SPIDERS]
 
     if not active:
         print("Nessun portale abilitato.")

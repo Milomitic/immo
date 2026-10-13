@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -17,7 +17,7 @@ logger = structlog.get_logger()
 
 # Portal priority for deduplication: lower index = higher priority.
 # When duplicates exist, the highest-priority portal becomes the canonical listing.
-PORTAL_PRIORITY = ["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "idealista"]
+PORTAL_PRIORITY = ["immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa", "idealista"]
 
 
 async def get_known_source_ids(portal: str) -> set[str]:
@@ -65,82 +65,185 @@ async def update_prices_from_observations(
     if not observed:
         return {"changed": 0, "checked": 0}
     now = datetime.now(timezone.utc).isoformat()
-    checked = len(observed)
     changed = 0
     async with async_session() as db:
-        # Look up current prices for these ids in one shot — much cheaper
-        # than N round-trips.
-        rows = (
-            await db.execute(
-                select(Listing.id, Listing.source_id, Listing.price).where(
-                    Listing.source_portal == portal,
-                    Listing.source_id.in_(list(observed.keys())),
+        for chunk in _chunks(list(observed.keys())):
+            rows = (
+                await db.execute(
+                    select(Listing.id, Listing.source_id, Listing.price, Listing.area_sqm).where(
+                        Listing.source_portal == portal,
+                        Listing.source_id.in_(chunk),
+                    )
                 )
-            )
-        ).all()
-        for row_id, sid, current in rows:
-            new_price = observed.get(sid)
-            if new_price is None:
-                continue
-            # Treat anything within €1 as unchanged — accounts for
-            # rounding noise on the portal side (some show "165.000€"
-            # one day and "165.001€" the next due to formatting jitter).
-            if current is not None and abs(current - new_price) < 1.0:
-                continue
-            # Recompute price_per_sqm if we have area_sqm — cheap and keeps
-            # filters consistent.
-            await db.execute(
-                update(Listing)
-                .where(Listing.id == row_id)
-                .values(
-                    price=new_price,
-                    price_previous=current,
-                    price_changed_at=now,
-                    price_per_sqm=(
-                        Listing.price_per_sqm
-                    ),  # placeholder; recalculated below if area exists
+            ).all()
+            for row_id, sid, current, area in rows:
+                new_price = observed[sid]
+                # Treat anything within €1 as unchanged — rounding noise on
+                # the portal side ("165.000€" one day, "165.001€" the next).
+                if current is not None and abs(current - new_price) < 1.0:
+                    continue
+                await db.execute(
+                    update(Listing)
+                    .where(Listing.id == row_id)
+                    .values(
+                        price=new_price,
+                        price_previous=current,
+                        price_changed_at=now,
+                        price_per_sqm=round(new_price / area, 2) if area else None,
+                    )
                 )
-            )
-            changed += 1
-        # Recompute price_per_sqm in a second pass for the changed rows.
-        # SQL keeps it deterministic without round-tripping the area.
-        if changed:
-            await db.execute(
-                text(
-                    "UPDATE listings SET price_per_sqm = "
-                    "CASE WHEN area_sqm > 0 THEN ROUND(price / area_sqm, 2) ELSE NULL END "
-                    "WHERE source_portal = :portal AND price_changed_at = :now"
-                ).bindparams(portal=portal, now=now)
-            )
+                changed += 1
         await db.commit()
-    return {"changed": changed, "checked": checked}
+    return {"changed": changed, "checked": len(observed)}
+
+
+# Keep IN (...) lists under SQLite's bound-parameter limit.
+_IN_CHUNK = 500
+
+
+def _chunks(values: list[str]):
+    for i in range(0, len(values), _IN_CHUNK):
+        yield values[i : i + _IN_CHUNK]
 
 
 async def bump_last_seen(portal: str, source_ids: list[str]) -> None:
-    """Bump last_seen_at on both listings and listing_sources for the given
-    portal/source_ids. Used for fresh-skip items that didn't get a detail fetch.
+    """Mark listings seen on ``portal``'s search pages as still live.
+
+    Updates the portal's own canonical rows and source rows, *and* the
+    canonical parent of any source row — a listing whose canonical portal
+    dropped it but which casa.it still shows is still on the market. All
+    touched rows are reactivated: being seen again is proof of life.
     """
     if not source_ids:
         return
     now = datetime.now(timezone.utc).isoformat()
     async with async_session() as db:
-        await db.execute(
+        for chunk in _chunks(source_ids):
+            await db.execute(
+                update(Listing)
+                .where(Listing.source_portal == portal, Listing.source_id.in_(chunk))
+                .values(last_seen_at=now, is_active=True)
+            )
+            await db.execute(
+                update(ListingSource)
+                .where(ListingSource.source_portal == portal, ListingSource.source_id.in_(chunk))
+                .values(last_seen_at=now, is_active=True)
+            )
+            parents = select(ListingSource.listing_id).where(
+                ListingSource.source_portal == portal, ListingSource.source_id.in_(chunk)
+            )
+            await db.execute(
+                update(Listing)
+                .where(Listing.id.in_(parents))
+                .values(last_seen_at=now, is_active=True)
+            )
+        await db.commit()
+
+
+async def refresh_source_urls(portal: str, urls: dict[str, str]) -> int:
+    """Point known listings at the URL the portal uses *now*.
+
+    The URL is a link, not part of the immutable content snapshot: when a
+    portal migrates its URL scheme every stored link would 404 otherwise.
+    Only rows whose URL actually differs are written. Returns the number of
+    rows (canonical + source) updated.
+    """
+    if not urls:
+        return 0
+    changed = 0
+    async with async_session() as db:
+        for chunk in _chunks(list(urls)):
+            listing_rows = (
+                await db.execute(
+                    select(Listing.id, Listing.source_id, Listing.listing_url).where(
+                        Listing.source_portal == portal, Listing.source_id.in_(chunk)
+                    )
+                )
+            ).all()
+            for row_id, sid, current in listing_rows:
+                if current != urls[sid]:
+                    await db.execute(
+                        update(Listing).where(Listing.id == row_id).values(listing_url=urls[sid])
+                    )
+                    changed += 1
+            source_rows = (
+                await db.execute(
+                    select(ListingSource.id, ListingSource.source_id, ListingSource.source_url).where(
+                        ListingSource.source_portal == portal, ListingSource.source_id.in_(chunk)
+                    )
+                )
+            ).all()
+            for row_id, sid, current in source_rows:
+                if current != urls[sid]:
+                    await db.execute(
+                        update(ListingSource).where(ListingSource.id == row_id).values(source_url=urls[sid])
+                    )
+                    changed += 1
+        await db.commit()
+    return changed
+
+
+async def cities_of_source_ids(portal: str, source_ids: list[str]) -> set[str]:
+    """Lower-cased cities of the listings behind ``portal``'s source_ids:
+    its own canonical rows and the canonical parents of its source rows."""
+    cities: set[str] = set()
+    async with async_session() as db:
+        for chunk in _chunks(source_ids):
+            own = select(Listing.city).where(
+                Listing.source_portal == portal, Listing.source_id.in_(chunk)
+            )
+            parents = select(Listing.city).where(
+                Listing.id.in_(
+                    select(ListingSource.listing_id).where(
+                        ListingSource.source_portal == portal, ListingSource.source_id.in_(chunk)
+                    )
+                )
+            )
+            for query in (own, parents):
+                rows = await db.execute(query.distinct())
+                cities.update(city.lower() for (city,) in rows if city)
+    return cities
+
+
+async def deactivate_stale_listings(portal: str, inactive_days: int, cities: set[str]) -> int:
+    """Deactivate ``portal``'s canonical listings not seen on any portal for
+    ``inactive_days`` (``last_seen_at`` already reflects every source, see
+    bump_last_seen). Callers must only invoke this after a run with full
+    catalog coverage — otherwise "not seen" just means "past the page cap".
+
+    Scope is limited to ``cities``: the cities the run actually observed. A
+    full scan of a Bari search proves nothing about the portal's Milano
+    listings, while a province-wide search that saw Altamura listings does
+    cover Altamura. Returns the number of listings deactivated.
+    """
+    if inactive_days <= 0 or not cities:
+        return 0
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=inactive_days)).isoformat()
+    in_scope = func.lower(Listing.city).in_(sorted(cities))
+    async with async_session() as db:
+        result = await db.execute(
             update(Listing)
             .where(
                 Listing.source_portal == portal,
-                Listing.source_id.in_(source_ids),
+                Listing.is_active.is_(True),
+                Listing.last_seen_at < cutoff,
+                in_scope,
             )
-            .values(last_seen_at=now)
+            .values(is_active=False, updated_at=now.isoformat())
         )
         await db.execute(
             update(ListingSource)
             .where(
                 ListingSource.source_portal == portal,
-                ListingSource.source_id.in_(source_ids),
+                ListingSource.is_active.is_(True),
+                ListingSource.last_seen_at < cutoff,
+                ListingSource.listing_id.in_(select(Listing.id).where(in_scope)),
             )
-            .values(last_seen_at=now)
+            .values(is_active=False)
         )
         await db.commit()
+        return result.rowcount or 0
 
 
 async def process_items_batch(

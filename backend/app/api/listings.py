@@ -18,7 +18,7 @@ from app.services.listing_service import (
     search_listings,
 )
 
-router = APIRouter(prefix="/api/listings", tags=["listings"])
+router = APIRouter(prefix="/listings", tags=["listings"])
 
 
 @router.get("", response_model=PaginatedListings)

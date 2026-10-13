@@ -31,6 +31,24 @@ class ScrapeRunResponse(BaseModel):
     progress_total: int | None = None
     phase: str | None = None
     last_progress_at: str | None = None
+    # Coverage: how many listings the search pages showed, and whether the
+    # whole catalog was walked (gates stale-listing deactivation).
+    listings_seen: int | None = None
+    coverage_complete: bool | None = None
+    job_id: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ScrapeErrorResponse(BaseModel):
+    id: str
+    run_id: str
+    portal: str
+    kind: str
+    url: str | None = None
+    status_code: int | None = None
+    message: str | None = None
+    created_at: str
 
     model_config = {"from_attributes": True}
 

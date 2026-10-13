@@ -7,6 +7,7 @@ from app.utils.text import clean_area, clean_price
 from scraper.items import ListingItem
 from scraper.spiders.base import BaseSpider, SearchParams
 from scraper.utils.html_extract import (
+    detect_feature,
     extract_publication_date_from_text,
     lookup,
     map_condition,
@@ -15,6 +16,7 @@ from scraper.utils.html_extract import (
     parse_float_text,
     parse_int,
     parse_italian_date,
+    yes_no,
 )
 from scraper.utils.jsonld import extract_listing_jsonld, parse_float, parse_price
 
@@ -34,6 +36,42 @@ def _extract_next_data(soup: BeautifulSoup) -> dict | None:
         return data.get("props", {}).get("pageProps", {}).get("pdp")
     except (json.JSONDecodeError, ValueError):
         return None
+
+def _structured_features(pdp: dict | None) -> tuple[dict[str, list], list[str]]:
+    """Flatten ``pdp.features.featureLists`` into ``{label: values}`` plus
+    the free tags of "Altre caratteristiche" (["balcone", "portineria"]).
+    Labels are lowercased so callers can match them directly."""
+    labels: dict[str, list] = {}
+    tags: list[str] = []
+    if not pdp:
+        return labels, tags
+    for group in (pdp.get("features") or {}).get("featureLists") or []:
+        for item in group.get("items") or []:
+            label = str(item.get("label") or "").strip().lower()
+            values = item.get("values") or []
+            if item.get("displayType") == "tag":
+                tags.extend(str(v).lower() for v in values if isinstance(v, str))
+            elif label:
+                labels[label] = values
+    # Tags like "balcone" behave like a label with a "present" value.
+    for tag in tags:
+        labels.setdefault(tag, ["sì"])
+    return labels, tags
+
+
+def _presence(values: list) -> bool | None:
+    """A structured value counts as present unless it's an explicit no:
+    "sì" → True, "no" → False, "privato"/"condominiale"/1 → True."""
+    if not values:
+        return None
+    v = values[0]
+    if isinstance(v, dict):
+        v = v.get("main")
+    known = yes_no(v)
+    if known is not None:
+        return known
+    return bool(str(v).strip()) if v is not None else None
+
 
 _FLOOR_PLAN_HINTS = ("planimetr", "floorplan", "floor-plan", "floor_plan", "/plan/", "_plan.", "-plan.")
 
@@ -139,15 +177,17 @@ class CasaSpider(BaseSpider):
           1. The "875 annunci" header text — most accurate, gives the
              exact result count.
           2. The pagination strip ("1 2 3 ... 9 Successiva") with a
-             lowercase ``pagin`` substring in the class name.
+             lowercase ``pagin`` substring in the class name. It only shows
+             a window of pages, so it's a lower bound — fallback only.
 
-        Page size is 20 and we cap at 50 pages to keep one scrape bounded.
+        Page size is 20. Returns the site's real page count; the run caps
+        it at ``max_pages`` and flags the truncation.
         """
         # 1. Total count in header text (e.g. "875 annunci")
         m = re.search(r"(\d[\d.]*)\s*annunci", html, re.IGNORECASE)
         if m:
             total = int(m.group(1).replace(".", ""))
-            return min((total + 19) // 20, 50)
+            return max(1, (total + 19) // 20)
 
         # 2. Pagination links (note: class is lowercase ``pagin``,
         #    NOT ``pagination``/``Pagination``).
@@ -159,7 +199,7 @@ class CasaSpider(BaseSpider):
                 if el.get_text(strip=True).isdigit()
             ]
             if pages:
-                return min(max(pages), 50)
+                return max(pages)
 
         return 1
 
@@ -173,7 +213,6 @@ class CasaSpider(BaseSpider):
         jsonld = extract_listing_jsonld(soup)
         features = parse_features(soup)
         page_text = soup.get_text(" ", strip=True)
-        page_text_lower = page_text.lower()
 
         # --- Title
         title_el = soup.select_one("h1")
@@ -436,14 +475,34 @@ class CasaSpider(BaseSpider):
         if zone_raw:
             zone = zone_raw
 
-        # --- Feature flags
-        has_elevator = "ascensore" in page_text_lower
-        has_balcony = "balcone" in page_text_lower
-        has_terrace = "terrazz" in page_text_lower
-        has_garage = "garage" in page_text_lower or "box auto" in page_text_lower or "posto auto" in page_text_lower
-        has_garden = "giardino" in page_text_lower
+        # --- Feature flags. Structured list first, then the description;
+        # never the whole page — its sidebar facets and SEO links mention
+        # "giardino"/"ascensore" on every listing (82% of casa.it listings
+        # had has_elevator=True this way, only 6% mentioned it).
+        labels, tags = _structured_features(pdp)
+        flag_text = " ".join(filter(None, [description, " ".join(tags)]))
 
-        listing_type = "rent" if "affitto" in url.lower() or "affitto" in page_text_lower[:500] else "sale"
+        def flag(label_names: tuple[str, ...], *keywords: str) -> bool | None:
+            for name in label_names:
+                if name in labels:
+                    return _presence(labels[name])
+            return detect_feature(flag_text, *keywords)
+
+        has_elevator = flag(("ascensore",), "ascensore")
+        has_balcony = flag(("balcone", "balconi"), "balcon")
+        has_terrace = flag(("terrazzo", "terrazza", "terrazzi"), "terrazz")
+        has_garage = flag(("box", "garage", "box auto", "posto auto"), "garage", "box auto", "posto auto")
+        has_garden = flag(("giardino",), "giardin")
+
+        # The pdp "channel" is authoritative; the old page-text sniff only
+        # looked at the first 500 chars, which include the nav menu.
+        channel = str((pdp or {}).get("channel") or "").lower()
+        if channel in ("rent", "affitto", "rental"):
+            listing_type = "rent"
+        elif channel in ("sale", "vendita"):
+            listing_type = "sale"
+        else:
+            listing_type = "rent" if "affitto" in url.lower() else "sale"
 
         return ListingItem(
             source_portal="casa",

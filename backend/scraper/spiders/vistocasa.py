@@ -29,7 +29,6 @@ the agent uploads photos when they list the property, so the timestamp
 lines up with the listing creation date.
 """
 
-import asyncio
 import re
 import unicodedata
 from collections.abc import AsyncGenerator
@@ -287,22 +286,23 @@ class VistocasaSpider(BaseSpider):
         return self.search_url
 
     async def get_total_pages(self, html: str) -> int:
-        # Best-effort: parse the page-numbers strip ("1 2 3 ... 15 >>"). The
-        # paged catalog yields 12 listings each, capped to ~50 pages.
-        soup = BeautifulSoup(html, "lxml")
-        nums: list[int] = []
-        for el in soup.select("[class*='pagi'] a, [id*='pagi'] a"):
-            txt = el.get_text(strip=True)
-            if txt.isdigit():
-                nums.append(int(txt))
-        if nums:
-            return min(max(nums), 50)
-        # Fallback: parse total result count, divide by 12 per page.
+        """Page count from the "1493 risultati" header (12 per page).
+
+        The pagination strip ("1 2 ... 15 >>") only renders a 15-page
+        window, so using it as the primary signal capped every run at 15
+        pages — about 12% of the catalog. It's only a fallback now.
+        """
         m = re.search(r"(\d[\d.]*)\s*risultat", html, re.IGNORECASE)
         if m:
             total = int(m.group(1).replace(".", ""))
-            return min((total + 11) // 12, 50)
-        return 1
+            return max(1, (total + 11) // 12)
+        soup = BeautifulSoup(html, "lxml")
+        nums = [
+            int(el.get_text(strip=True))
+            for el in soup.select("[class*='pagi'] a, [id*='pagi'] a")
+            if el.get_text(strip=True).isdigit()
+        ]
+        return max(nums) if nums else 1
 
     async def parse_search_results(self, html: str) -> list[str]:
         urls: list[str] = []
@@ -369,13 +369,20 @@ class VistocasaSpider(BaseSpider):
             "__VIEWSTATE": vs,
             "__VIEWSTATEGENERATOR": vsg,
         }
+        if self.circuit_open:
+            return None
         try:
             resp = await client.post(self.search_url, data=data, timeout=30)
-            if resp.status_code != 200:
-                return None
-            return resp.text
-        except Exception:
+        except Exception as e:
+            self._register_failure("network", f"{self.search_url}#page={page}", None, str(e))
             return None
+        if resp.status_code != 200:
+            kind = "blocked" if resp.status_code in (403, 429) else "http"
+            self._register_failure(kind, f"{self.search_url}#page={page}", resp.status_code,
+                                   f"HTTP {resp.status_code}")
+            return None
+        self._consecutive_failures = 0
+        return resp.text
 
     async def run(self, params: SearchParams) -> AsyncGenerator[ListingItem, None]:
         """Stateful WebForms search: GET page 1, then POST __doPostBack to
@@ -386,8 +393,9 @@ class VistocasaSpider(BaseSpider):
         self.progress.set_phase("search")
         self.progress.set_description(f"{self.portal_name} cerca pag 1")
 
-        first_html = await self.fetch(self.search_url)
+        first_html = await self.fetch(self.search_url, not_found_ok=False)
         if not first_html:
+            self.search_pages_failed += 1
             self.progress.set_phase("failed")
             return
 
@@ -395,8 +403,11 @@ class VistocasaSpider(BaseSpider):
         viewstate = _hidden_field(soup, "__VIEWSTATE")
         viewstate_gen = _hidden_field(soup, "__VIEWSTATEGENERATOR")
 
-        total_pages = await self.get_total_pages(first_html)
-        total_pages = min(total_pages, params.max_pages)
+        site_pages = await self.get_total_pages(first_html)
+        total_pages = min(site_pages, params.max_pages)
+        self.search_truncated = site_pages > params.max_pages
+        self.progress.set_total(total_pages)
+        self.progress.advance()
 
         # Collect (url, price) pairs across pages. First non-None price
         # wins per URL, mirroring BaseSpider.run()'s dedup logic.
@@ -412,9 +423,12 @@ class VistocasaSpider(BaseSpider):
 
         for page in range(2, total_pages + 1):
             page_html = await self._post_search(page, viewstate, viewstate_gen)
+            self.progress.advance()
             if not page_html:
+                self.search_pages_failed += 1
                 consecutive_failures += 1
                 if consecutive_failures >= _MAX_CONSECUTIVE_POST_FAILURES:
+                    self.search_pages_failed += total_pages - page
                     break
                 continue
             consecutive_failures = 0
@@ -431,55 +445,8 @@ class VistocasaSpider(BaseSpider):
                 f"{self.portal_name} cerca pag {page}/{total_pages} ({len(url_prices)} url)"
             )
 
-        listing_urls: list[str] = list(url_prices.keys())
-
-        if not listing_urls:
-            self.progress.set_phase("done")
-            return
-
-        # Known-skip handling — same shape as BaseSpider.run(). Capture
-        # the price observed on the search card for known IDs so the
-        # runner can spot price changes without a detail fetch.
-        known_ids = params.known_source_ids or set()
-        to_fetch: list[str] = []
-        for url in listing_urls:
-            sid = self._extract_source_id_from_url(url)
-            if sid and sid in known_ids:
-                self.known_skipped_ids.append(sid)
-                p = url_prices.get(url)
-                if p is not None:
-                    self.observed_prices[sid] = p
-            else:
-                to_fetch.append(url)
-
-        if not to_fetch:
-            self.progress.set_phase("done")
-            return
-
-        self.progress.set_phase("fetch")
-        self.progress.set_total(len(to_fetch))
-        sem = asyncio.Semaphore(self.concurrency)
-
-        async def fetch_and_parse(url: str) -> ListingItem | None:
-            async with sem:
-                html = await self.fetch(url)
-                if not html:
-                    self.progress.advance()
-                    return None
-                try:
-                    item = await self.parse_listing(url, html)
-                except Exception:
-                    item = None
-                self.progress.advance()
-                return item
-
-        tasks = [asyncio.create_task(fetch_and_parse(u)) for u in to_fetch]
-        for coro in asyncio.as_completed(tasks):
-            item = await coro
-            if item:
-                yield item
-
-        self.progress.set_phase("done")
+        async for item in self.detail_phase(url_prices, params):
+            yield item
 
     async def parse_listing(self, url: str, html: str) -> ListingItem | None:
         source_id = self._extract_source_id_from_url(url)
