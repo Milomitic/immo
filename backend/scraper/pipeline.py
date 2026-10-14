@@ -17,10 +17,12 @@ logger = structlog.get_logger()
 
 # Portal priority for deduplication: lower index = higher priority.
 # When duplicates exist, the highest-priority portal becomes the canonical listing.
-# Wikicasa republishes agencies' listings: the agencies' own portals win.
-# Subito comes last of the active ones: no address or coordinates.
+# Republishers (Wikicasa, Bakeca, TrovaCasa) rank below the agencies' own
+# portals; TrovaCasa and Subito come last of the active ones: built from
+# search cards, without coordinates (Subito without an address either).
 PORTAL_PRIORITY = [
-    "immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "subito", "idealista",
+    "immobiliare", "casa", "tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "bakeca",
+    "trovacasa", "subito", "idealista",
 ]
 
 
@@ -531,6 +533,12 @@ async def _process_single(db: AsyncSession, item: ListingItem) -> str:
     return "new"
 
 
+def _place_exactly(listing: Listing, item: ListingItem) -> None:
+    listing.lat = item.lat
+    listing.lng = item.lng
+    listing.geo_precision = None
+
+
 def _update_listing(listing: Listing, item: ListingItem, now: str) -> None:
     """Refresh canonical listing with new data from the same portal."""
     listing.title = item.title
@@ -565,9 +573,8 @@ def _update_listing(listing: Listing, item: ListingItem, now: str) -> None:
         listing.images = json.dumps(item.images)
     if item.floor_plans:
         listing.floor_plans = json.dumps(item.floor_plans)
-    if item.lat and not listing.lat:
-        listing.lat = item.lat
-        listing.lng = item.lng
+    if item.lat and (not listing.lat or listing.geo_precision):
+        _place_exactly(listing, item)
     if item.address:
         listing.address = item.address
         listing.normalized_address = normalize_address(item.address, item.city)
@@ -588,9 +595,8 @@ def _enrich_listing(listing: Listing, item: ListingItem, now: str) -> None:
     # not overwriting canonical fields.
     listing.is_active = True
 
-    if not listing.lat and item.lat:
-        listing.lat = item.lat
-        listing.lng = item.lng
+    if item.lat and (not listing.lat or listing.geo_precision):
+        _place_exactly(listing, item)  # a real position beats our estimate
     if not listing.description and item.description:
         listing.description = item.description
     if not listing.energy_class and item.energy_class:
@@ -668,8 +674,7 @@ def _promote_listing(listing: Listing, item: ListingItem, now: str) -> None:
     if item.province:
         listing.province = item.province
     if item.lat is not None:
-        listing.lat = item.lat
-        listing.lng = item.lng
+        _place_exactly(listing, item)
     if item.images:
         listing.images = json.dumps(item.images)
     if item.floor_plans:

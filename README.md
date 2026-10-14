@@ -1,7 +1,7 @@
 # Immo — Aggregatore Annunci Immobiliari
 
 Web app full-stack che aggrega, deduplica e confronta annunci immobiliari da
-**8 portali** italiani: ricerca full-text con filtri, mappa in stile portale
+**10 portali** italiani: ricerca full-text con filtri, mappa in stile portale
 con anteprima rapida e disegno del perimetro, storico prezzi, aste,
 preferiti, ricerche salvate con avvisi e scansione one-click dalla homepage.
 
@@ -9,9 +9,9 @@ preferiti, ricerche salvate con avvisi e scansione one-click dalla homepage.
 
 ### Aggregazione multi-portale
 Scraping da **Immobiliare.it**, **Casa.it**, **Tecnocasa**, **RE/MAX**,
-**Gabetti**, **Vistocasa**, **Wikicasa** (agenzie e aste giudiziarie) e
-**Subito** (dove pubblicano i privati). Idealista è presente ma disabilitato
-di default (DataDome blocca tutto). Ogni annuncio nuovo viene deduplicato cross-portale
+**Gabetti**, **Vistocasa**, **Wikicasa** (agenzie e aste giudiziarie),
+**Subito** (dove pubblicano i privati), **Bakeca** e **TrovaCasa**. Idealista
+è presente ma disabilitato di default (DataDome blocca tutto). Ogni annuncio nuovo viene deduplicato cross-portale
 (indirizzo, prezzo, superficie, coordinate, stanze) e il portale con priorità
 più alta diventa canonical; gli altri restano attaccati come `listing_sources`.
 Gli annunci spariti da un portale vengono disattivati solo se l'ultima
@@ -44,6 +44,13 @@ portale, aste e da quanto è pubblicato; **cliccandola si apre un'anteprima**
 alla scheda completa. I filtri si aprono in una sotto-barra chiudibile.
 **Disegna area**: un perimetro cliccando i vertici → il backend filtra con
 point-in-polygon; il perimetro è in URL, condivisibile, attivo anche in lista.
+
+**Posizioni approssimate**: gli annunci senza coordinate (Subito, TrovaCasa,
+agenzie che nascondono la posizione) ma con la via vengono messi sulla mappa
+al centro della via, o al civico se c'è; il pin ha il bordo tratteggiato e
+l'anteprima dice "posizione approssimativa". Chi indica solo la zona o il
+comune resta fuori dalla mappa (ma è negli elenchi). Vedi
+[Posizioni approssimate](#mappa--posizioni-approssimate).
 
 ### Aste
 Gli annunci all'asta sono riconosciuti (dato strutturato su Immobiliare.it e
@@ -141,6 +148,7 @@ cd backend
 python -m scraper.runner                      # tutti i portali, città di default
 python -m scraper.runner --portal vistocasa   # un solo portale
 python -m scraper.runner --city molfetta      # un'altra città
+python -m scraper.geolocate                   # posizioni dalla via per chi non ne ha
 ```
 
 ### 5. Docker
@@ -350,7 +358,7 @@ backend/
     observability.py  Sentry + middleware delle metriche
   alembic/         Migrazioni (applicate all'avvio)
   scraper/
-    spiders/       8 spider + BaseSpider + PlaywrightSpider (idealista)
+    spiders/       10 spider + BaseSpider + PlaywrightSpider (idealista)
     utils/         Rate limiter, JSON-LD, RSC flight (Next.js), payload Nuxt, HTML extract
     pipeline.py    Dedup + upsert batch, price-diff, aste, disattivazione
     runner.py      Orchestratore CLI + ticker async per il progress DB
@@ -419,9 +427,40 @@ Subito è dietro DataDome, quindi lo spider non apre mai un annuncio: le
 pagine di ricerca (Next.js, `__NEXT_DATA__`) contengono già tutto — testo,
 foto, superficie, locali, piano, stato, classe energetica, dotazioni,
 privato/agenzia. Una scansione di Bari sono ~35 richieste, una ogni 5
-secondi. Subito non dà indirizzo né coordinate: gli annunci compaiono nelle
-liste ma non sulla mappa. Gli URL di ricerca richiedono regione e provincia:
+secondi. Subito non dà indirizzo né coordinate: un annuncio va sulla mappa
+se la sua descrizione nomina la via. Gli URL di ricerca richiedono regione e provincia:
 i comuni supportati sono in `_AREAS` (Bari e provincia, capoluoghi pugliesi).
+
+### Scraping — Bakeca e TrovaCasa
+**Bakeca** ripubblica annunci di agenzie e privati: la ricerca
+(`{città}.bakeca.it/annunci/vendita-case/page/N/`) ha un JSON-LD per annuncio
+con prezzo, comune e coordinate; il sottodominio copre la provincia, le card
+degli altri comuni vengono saltate. Il dettaglio aggiunge descrizione
+completa, foto, tipologia, m², classe energetica e quartiere.
+
+**TrovaCasa** è il secondo portale del gruppo Immobiliare.it: i suoi annunci
+sono in gran parte quelli di Immobiliare, che abbiamo già completi. Lo
+spider quindi non apre gli annunci: le card della ricerca hanno tipo, via
+nel titolo, quartiere, m², locali, prezzo, inizio della descrizione,
+etichette (posto auto, ascensore, riscaldamento…) e foto — ~125 pagine per
+Bari invece di ~3.000 richieste. Parte del testo del sito è UTF-8 codificato
+due volte ("Ã¨" per "è"): `fix_mojibake` lo ripara.
+
+### Mappa — posizioni approssimate
+`app/services/geolocate.py`, eseguito alla fine di ogni scansione (e a mano
+con `python -m scraper.geolocate`). Per ogni annuncio attivo senza
+coordinate cerca una via: nell'indirizzo, nel campo zona (alcuni portali ci
+mettono la via) o nel titolo/descrizione ("…San Pasquale Alta, Via
+Fanelli"). La posizione viene prima dai nostri dati — la mediana degli
+annunci con coordinate esatte su quella via — e altrimenti da Nominatim
+(OpenStreetMap) secondo la sua policy: una richiesta al secondo, User-Agent
+identificativo, ogni risposta (anche negativa) in cache in `geocode_cache`.
+Un risultato a più di 25 km dal comune è una via omonima altrove e viene
+scartato. `geo_precision` registra `address` (civico) o `street` (centro
+della via): la mappa disegna il pin tratteggiato e lo sposta di qualche
+metro in modo deterministico, così più annunci sulla stessa via non si
+sovrappongono; la deduplicazione ignora queste coordinate; appena un
+portale dà la posizione vera, la stima viene sostituita.
 
 ### Scraping — RE/MAX (Next.js RSC)
 Il sito non ha più HTML con i dati: stanno nel "flight" React Server
@@ -476,9 +515,10 @@ Variabili principali (elenco completo in `.env.example` e
 | `DATABASE_URL` | `data/immo.db` alla root | Lasciala non impostata in locale |
 | `SCRAPE_DEFAULT_CITY` | `bari` | Città del run CLI e del bottone scan |
 | `SCRAPE_SCHEDULE_ENABLED` / `SCRAPE_INTERVAL_HOURS` | `false` / `6` | Scansioni periodiche automatiche (opt-in) |
-| `SCRAPE_<PORTALE>_ENABLED` | `true` | Uno per portale (immobiliare, casa, tecnocasa, remax, gabetti, vistocasa, wikicasa, subito) |
+| `SCRAPE_<PORTALE>_ENABLED` | `true` | Uno per portale (immobiliare, casa, tecnocasa, remax, gabetti, vistocasa, wikicasa, subito, bakeca, trovacasa) |
 | `SCRAPE_IDEALISTA_ENABLED` | `false` | DataDome blocca — servirebbe un proxy residenziale |
-| `SCRAPE_RATE_LIMIT_RPM` / `SCRAPE_RATE_LIMITS` | 60 / per portale | Richieste al minuto (casa.it 30, Wikicasa 30, Subito 12) |
+| `SCRAPE_RATE_LIMIT_RPM` / `SCRAPE_RATE_LIMITS` | 60 / per portale | Richieste al minuto (casa.it 30, Wikicasa 30, Bakeca 30, TrovaCasa 20, Subito 12) |
+| `GEOCODER_ENABLED` | `true` | Posizioni approssimate anche via Nominatim; `false` = solo i nostri dati |
 | `SCRAPE_MAX_PAGES` | 200 | Tetto di pagine di ricerca per portale |
 | `SCRAPE_CONCURRENCY` | 4 | Detail fetch concorrenti per spider |
 | `DEDUP_THRESHOLD` | 0.85 | Score cross-portale per considerare due annunci uguali |
@@ -507,8 +547,8 @@ prezzo e superficie quasi identici. Un annuncio d'agenzia ripubblicato si
 fonde comunque; due case diverse con misure simili no.
 
 Il portale che viene prima in `PORTAL_PRIORITY = ["immobiliare", "casa",
-"tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "subito",
-"idealista"]` resta canonical; gli altri diventano `ListingSource`. Se arriva
+"tecnocasa", "gabetti", "remax", "vistocasa", "wikicasa", "bakeca",
+"trovacasa", "subito", "idealista"]` resta canonical; gli altri diventano `ListingSource`. Se arriva
 un match da un portale con priorità più alta, `_promote_listing` sovrascrive i
 campi canonical mantenendo stabile `listing.id`.
 

@@ -14,6 +14,7 @@ export function cn(...inputs: ClassValue[]) {
  *  - tecnocasa: detail 1024x768 → gallery 1200x900 for the full view
  *  - wikicasa: stored at 1280x960 (webp) → 640x480 for cards
  *  - subito: a size "rule" in the query: gallery 1206x898 → card 600x400 (16 KB)
+ *  - trovacasa: xxl (155 KB) → l (49 KB) for cards
  * Other portals (remax, gabetti, vistocasa) expose a single size.
  */
 export function imageVariant(url: string, use: "card" | "full"): string {
@@ -22,6 +23,7 @@ export function imageVariant(url: string, use: "card" | "full"): string {
     if (/\/\/images-\d+\.casa\.it\//.test(url)) return url.replace(/\/\d+x\d+\/listing\//, "/640x480/listing/");
     if (url.includes("images.wk-cdn.it/")) return url.replace(/\/webp\/\d+x\d+\.webp$/, "/webp/640x480.webp");
     if (url.includes("images.sbito.it/")) return url.replace(/rule=[\w-]+/, "rule=large-fixed-card-2x-auto");
+    if (url.includes("cdn.trovacasa.it/annunci/xxl/")) return url.replace("/annunci/xxl/", "/annunci/l/");
   } else if (url.includes("medialabtc.it/")) {
     return url.replace(/\/detail\.jpeg$/, "/gallery.jpeg");
   }
@@ -63,6 +65,8 @@ export function portalLabel(portal: string): string {
     vistocasa: "Vistocasa",
     wikicasa: "Wikicasa",
     subito: "Subito",
+    bakeca: "Bakeca",
+    trovacasa: "TrovaCasa",
   };
   return labels[portal] || portal;
 }
@@ -78,6 +82,8 @@ export function portalColor(portal: string): string {
     vistocasa: "bg-teal-600",
     wikicasa: "bg-indigo-600",
     subito: "bg-rose-600",
+    bakeca: "bg-lime-700",
+    trovacasa: "bg-sky-600",
   };
   return colors[portal] || "bg-gray-500";
 }

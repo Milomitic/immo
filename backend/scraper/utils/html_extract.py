@@ -9,6 +9,7 @@ of how the site formats it.
 """
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
@@ -348,6 +349,37 @@ def clamp_publication_date(iso: str | None) -> str | None:
     if (d - today).days <= 2:
         return today.isoformat()
     return None
+
+
+# Double-encoded UTF-8 ("Ã¨" for "è", "â€“" for "–"): UTF-8 bytes once
+# decoded as Windows-1252, then stored as UTF-8 again. Only its unmistakable
+# shapes are touched — "Ã"/"Â" + one byte (accented letters, °, «»), "â" +
+# two (dashes, quotes, €, …) — never "PERCHÉ…" or a final "città". A UTF-8
+# continuation byte reads in Windows-1252 as U+0080-U+00BF or, for
+# 0x80-0x9F, as one of its typographic characters.
+_CONT = "\u0080-\u00bf\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d" \
+        "\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178"
+_MOJIBAKE_RE = re.compile(f"[\u00c2\u00c3][{_CONT}]|\u00e2[{_CONT}]{{2}}")
+# An excerpt cut in the middle of a sequence: "questa Ã..."
+_CUT_LEAD_RE = re.compile("[\u00c2\u00c3\u00e2]\u20ac?(?=\\.\\.\\.|\u2026|$)")
+
+
+def _repair(m: re.Match) -> str:
+    try:
+        fixed = m.group(0).encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return m.group(0)
+    # A control character means these bytes weren't a broken letter (e.g.
+    # the remains of an emoji already mangled at the source): leave them.
+    return m.group(0) if any(unicodedata.category(ch) == "Cc" for ch in fixed) else fixed
+
+
+def fix_mojibake(text: str | None) -> str:
+    """Undo double-encoded UTF-8, sequence by sequence: the same text may
+    mix it with characters that are fine."""
+    if not text:
+        return ""
+    return _CUT_LEAD_RE.sub("", _MOJIBAKE_RE.sub(_repair, text))
 
 
 def parse_int(text: str | None) -> int | None:

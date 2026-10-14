@@ -16,6 +16,7 @@ from app.database import async_session, init_db
 from app.models.scrape_run import ScrapeError, ScrapeRun
 from app.observability import init_sentry
 from app.services.alert_service import send_alert_digest
+from app.services.geolocate import locate_missing_listings
 from app.services.scrape_service import enabled_portals
 from app.utils.logging import setup_logging
 from scraper.pipeline import (
@@ -59,6 +60,14 @@ try:
     from scraper.spiders.subito import SubitoSpider
 except ImportError:
     SubitoSpider = None
+try:
+    from scraper.spiders.bakeca import BakecaSpider
+except ImportError:
+    BakecaSpider = None
+try:
+    from scraper.spiders.trovacasa import TrovacasaSpider
+except ImportError:
+    TrovacasaSpider = None
 
 
 class _ProgressBar:
@@ -179,6 +188,10 @@ if WikicasaSpider:
     SPIDERS["wikicasa"] = WikicasaSpider
 if SubitoSpider:
     SPIDERS["subito"] = SubitoSpider
+if BakecaSpider:
+    SPIDERS["bakeca"] = BakecaSpider
+if TrovacasaSpider:
+    SPIDERS["trovacasa"] = TrovacasaSpider
 
 BATCH_SIZE = 25
 
@@ -473,6 +486,18 @@ async def main(portal: str | None = None, city: str | None = None) -> None:
         await run_spider(portal, target_city, listing_type)
     else:
         await run_all_spiders(target_city, listing_type)
+
+    # Listings the portals don't place get an approximate pin (street, zone
+    # or town centre). A failure here must not fail the scan either.
+    try:
+        located = await locate_missing_listings()
+        if located:
+            summary = ", ".join(f"{n} {k}" for k, n in sorted(located.items()))
+            sys.stderr.write(f"Posizioni approssimate: {summary}.\n")
+    except Exception as e:
+        logger.exception("geolocate_failed")
+        sentry_sdk.capture_exception(e)
+        sys.stderr.write(f"Posizioni approssimate: errore ({e}).\n")
 
     # Saved-search digest (no-op unless SMTP is configured). A mail failure
     # must not turn a good scrape into a failed process.

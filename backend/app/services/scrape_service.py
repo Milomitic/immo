@@ -18,7 +18,7 @@ from app.models.scrape_run import ScrapeRun
 
 ALL_PORTALS = (
     "immobiliare", "casa", "tecnocasa", "remax", "gabetti", "vistocasa", "wikicasa", "subito",
-    "idealista",
+    "bakeca", "trovacasa", "idealista",
 )
 
 # A "running" row whose heartbeat is older than this belongs to a dead

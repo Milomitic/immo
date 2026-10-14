@@ -41,6 +41,7 @@ def listing_to_response(listing: Listing) -> ListingResponse:
         province=listing.province,
         lat=listing.lat,
         lng=listing.lng,
+        geo_precision=listing.geo_precision,
         images=json.loads(listing.images) if listing.images else [],
         floor_plans=json.loads(listing.floor_plans) if listing.floor_plans else [],
         listing_url=listing.listing_url,
@@ -400,6 +401,7 @@ async def get_listing_markers(
         Listing.publication_date,
         Listing.is_auction,
         Listing.source_portal,
+        Listing.geo_precision,
     ).where(Listing.lat.isnot(None), Listing.lng.isnot(None))
     query = _apply_listing_filters(query, params, use_fts=bool(params.q) and await has_search_index(db))
 
@@ -455,6 +457,7 @@ async def get_listing_markers(
                 publication_date=row.publication_date,
                 source_portal=row.source_portal,
                 is_auction=bool(row.is_auction),
+                geo_precision=row.geo_precision,
             )
         )
 

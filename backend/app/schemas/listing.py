@@ -20,6 +20,8 @@ class ListingBase(BaseModel):
     province: str | None = None
     lat: float | None = None
     lng: float | None = None
+    # None: the portal's position; else how ours was estimated.
+    geo_precision: str | None = None
     images: list[str] = []
     floor_plans: list[str] = []
     listing_url: str
@@ -181,6 +183,7 @@ class ListingMarker(BaseModel):
     thumbnail: str | None = None
     publication_date: str | None = None
     is_auction: bool = False
+    geo_precision: str | None = None
     source_portal: str = ""
 
     model_config = {"from_attributes": True}

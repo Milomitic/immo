@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     SCRAPE_VISTOCASA_ENABLED: bool = True
     SCRAPE_WIKICASA_ENABLED: bool = True
     SCRAPE_SUBITO_ENABLED: bool = True
+    SCRAPE_BAKECA_ENABLED: bool = True
+    SCRAPE_TROVACASA_ENABLED: bool = True
     SCRAPE_RATE_LIMIT_RPM: int = 60  # default for portals not listed below
     # Per-portal overrides. casa.it's WAF bans the IP after aggressive runs,
     # so it gets half the default budget.
@@ -44,6 +46,10 @@ class Settings(BaseSettings):
         # DataDome-protected: one page every 5s, and only search pages
         # (the spider never opens a listing).
         "subito": 12,
+        # Behind Cloudflare, like Wikicasa.
+        "bakeca": 30,
+        # Search pages only (~125 for Bari): no need to hurry.
+        "trovacasa": 20,
     }
     # Upper bound on search pages per path. Spiders follow the site's own
     # page count up to this; immobiliare offers ~100 pages for Bari, so the
@@ -98,6 +104,12 @@ class Settings(BaseSettings):
     # exposed publicly. Unhandled errors of the API and the scraper go to
     # Sentry when SENTRY_DSN is set.
     METRICS_ENABLED: bool = True
+
+    # Listings without a position get an approximate one after each scan
+    # (street / zone / town centre). Our own data comes first; what it
+    # can't answer is asked of OpenStreetMap's Nominatim (1 request/s,
+    # cached forever). False: own data only, no network.
+    GEOCODER_ENABLED: bool = True
     SENTRY_DSN: str = ""
     SENTRY_ENVIRONMENT: str = "development"
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0

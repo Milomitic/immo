@@ -7,7 +7,8 @@ import "leaflet/dist/leaflet.css";
 import Link from "next/link";
 import Supercluster from "supercluster";
 import { useTheme } from "next-themes";
-import type { ListingMarker } from "@/lib/types";
+import type { GeoPrecision, ListingMarker } from "@/lib/types";
+import { approxPositionText } from "@/components/listings/ApproxPosition";
 import { formatPrice, imageVariant } from "@/lib/utils";
 
 L.Icon.Default.mergeOptions({
@@ -77,19 +78,44 @@ function cachedIcon(key: string, make: () => L.DivIcon): L.DivIcon {
   return icon;
 }
 
+// Estimated positions (the portal gave none) are spread a little around
+// the estimate, deterministically, so listings on the same street don't
+// stack into one unreachable pin. The spread grows with the uncertainty.
+const SPREAD_M: Record<GeoPrecision, number> = { address: 10, street: 35 };
+
+function hash01(text: string, salt: number): number {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+function pinPosition(m: ListingMarker): [number, number] {
+  if (!m.geo_precision) return [m.lat, m.lng];
+  const radius = SPREAD_M[m.geo_precision] * Math.sqrt(hash01(m.id, 1)); // uniform in the disc
+  const angle = 2 * Math.PI * hash01(m.id, 2);
+  const dLat = (radius * Math.cos(angle)) / 111_320;
+  const dLng = (radius * Math.sin(angle)) / (111_320 * Math.cos((m.lat * Math.PI) / 180));
+  return [m.lat + dLat, m.lng + dLng];
+}
+
 // Pills of variable width: the icon box is 0x0 at the coordinate and the
-// pill is drawn above it, its tail tip exactly on the spot.
-function createPriceIcon(price: number | null, highlighted: boolean, auction: boolean): L.DivIcon {
+// pill is drawn above it, its tail tip exactly on the spot. Estimated
+// positions get a dashed outline.
+function createPriceIcon(
+  price: number | null, highlighted: boolean, auction: boolean, approx: GeoPrecision | null,
+): L.DivIcon {
   const label = shortPrice(price);
-  return cachedIcon(`pin:${label}:${highlighted}:${auction}`, () => {
+  return cachedIcon(`pin:${label}:${highlighted}:${auction}:${approx}`, () => {
     const bg = highlighted ? PIN_SELECTED : auction ? PIN_AUCTION : PIN_BLUE;
     const scale = highlighted ? "scale(1.12)" : "";
-    const title = auction ? ' title="Asta"' : "";
+    const hints = [auction ? "Asta" : "", approx ? approxPositionText(approx) : ""].filter(Boolean);
+    const title = hints.length ? ` title="${hints.join(" · ")}"` : "";
+    const outline = approx ? "outline:1.5px dashed #fff;outline-offset:-3px;opacity:.88;" : "";
     return L.divIcon({
       className: "",
       html:
         `<div${title} style="position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 6px)) ${scale};transform-origin:50% 100%;font-family:system-ui,sans-serif">` +
-        `<div style="background:${bg};color:#fff;border-radius:6px;padding:2px 7px;font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)">${label}</div>` +
+        `<div style="background:${bg};color:#fff;border-radius:6px;padding:2px 7px;font-size:12px;font-weight:700;line-height:18px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);${outline}">${label}</div>` +
         `<div style="position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid ${bg}"></div>` +
         `</div>`,
       iconSize: [0, 0],
@@ -126,8 +152,8 @@ function ListingPin({
 }) {
   return (
     <Marker
-      position={[m.lat, m.lng]}
-      icon={createPriceIcon(m.price, selected, m.is_auction)}
+      position={pinPosition(m)}
+      icon={createPriceIcon(m.price, selected, m.is_auction, m.geo_precision)}
       eventHandlers={{ click: () => onClick?.(m.id) }}
       zIndexOffset={selected ? 1000 : 0}
     >
@@ -153,6 +179,9 @@ function ListingPin({
           <div style={{ fontSize: 12, marginBottom: 6, lineHeight: 1.3 }}>
             {m.title}
           </div>
+          {m.geo_precision && (
+            <div style={{ fontSize: 11, marginBottom: 6, opacity: 0.75 }}>{approxPositionText(m.geo_precision)}</div>
+          )}
           <Link
             href={`/listing/${m.id}`}
             style={{ color: "#2563eb", fontSize: 12, fontWeight: 600 }}
@@ -205,7 +234,7 @@ function ClusteredMarkers({
         .filter((m) => m.id !== selectedId)
         .map((m) => ({
           type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [m.lng, m.lat] },
+          geometry: { type: "Point" as const, coordinates: pinPosition(m).reverse() },
           properties: { id: m.id, price: m.price },
         })),
     );

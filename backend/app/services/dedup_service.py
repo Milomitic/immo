@@ -123,13 +123,16 @@ async def find_duplicate(
     has_coords = lat is not None and lng is not None
 
     for candidate in candidates:
+        # A position we estimated (street/zone/town centre) is not evidence
+        # that two listings are the same home.
+        c_lat, c_lng = (None, None) if candidate.geo_precision else (candidate.lat, candidate.lng)
         score = compute_similarity(
             normalized_addr, price, area_sqm, rooms, lat, lng,
             candidate.normalized_address, candidate.price, candidate.area_sqm,
-            candidate.rooms, candidate.lat, candidate.lng,
+            candidate.rooms, c_lat, c_lng,
         )
         located = (normalized_addr and candidate.normalized_address) or (
-            has_coords and candidate.lat is not None and candidate.lng is not None
+            has_coords and c_lat is not None and c_lng is not None
         )
         needed = threshold if located else max(threshold, LOCATIONLESS_THRESHOLD)
         if score >= needed and score > best_score:

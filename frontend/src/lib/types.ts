@@ -1,3 +1,8 @@
+/** How an estimated position was found: from the street and house
+ *  number, or the middle of the street. Listings that name no street
+ *  get no position at all. */
+export type GeoPrecision = "address" | "street";
+
 export interface Listing {
   id: string;
   title: string;
@@ -18,6 +23,8 @@ export interface Listing {
   province: string | null;
   lat: number | null;
   lng: number | null;
+  /** null: the portal's position; else how we estimated it. */
+  geo_precision: GeoPrecision | null;
   images: string[];
   floor_plans: string[];
   listing_url: string;
@@ -166,6 +173,7 @@ export interface ListingMarker {
   id: string;
   lat: number;
   lng: number;
+  geo_precision: GeoPrecision | null;
   price: number | null;
   title: string;
   property_type: string;

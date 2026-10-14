@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class ScrapeTriggerRequest(BaseModel):
-    portal: str = "all"  # immobiliare, idealista, casa, tecnocasa, remax, gabetti, vistocasa, wikicasa, subito, all
+    portal: str = "all"  # immobiliare, idealista, casa, tecnocasa, remax, gabetti, vistocasa, wikicasa, subito, bakeca, trovacasa, all
     city: str | None = None
 
 

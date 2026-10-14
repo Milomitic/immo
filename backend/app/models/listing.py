@@ -37,6 +37,9 @@ class Listing(Base):
     province: Mapped[str | None] = mapped_column(Text)
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
+    # None: the portal's own position. Otherwise an approximation we
+    # assigned (app.services.geolocate): address | street | zone | city.
+    geo_precision: Mapped[str | None] = mapped_column(Text)
     normalized_address: Mapped[str | None] = mapped_column(Text)
 
     # Media & links

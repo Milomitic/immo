@@ -16,6 +16,7 @@ import { PriceHistory } from "@/components/listings/PriceHistory";
 import { Badge } from "@/components/ui/Badge";
 import { AuctionBadge } from "@/components/listings/AuctionBadge";
 import { AuctionDetails } from "@/components/listings/AuctionDetails";
+import { ApproxPosition } from "@/components/listings/ApproxPosition";
 import { FACT_ICONS, presentAmenities } from "@/components/listings/featureIcons";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
@@ -300,7 +301,8 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             {/* Map */}
             {listing.lat && listing.lng && (
               <div>
-                <h2 className="text-base font-bold mb-3">Posizione</h2>
+                <h2 className="text-base font-bold mb-1">Posizione</h2>
+                <ApproxPosition precision={listing.geo_precision} className="mb-2 text-xs" />
                 <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border)]">
                   <iframe
                     src={`https://www.openstreetmap.org/export/embed.html?bbox=${listing.lng - 0.01},${listing.lat - 0.007},${listing.lng + 0.01},${listing.lat + 0.007}&layer=mapnik&marker=${listing.lat},${listing.lng}`}
